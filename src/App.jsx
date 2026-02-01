@@ -182,36 +182,17 @@ function App() {
 
         const query = search.trim().toUpperCase();
 
-        // Parse course code format: "CMPT 120" or "CMPT120"
-        const courseMatch = query.match(/^([A-Z]{2,4})\s*(\d{3})?$/);
+        // Extract letters (department) and numbers (course number) from query
+        const letters = query.match(/[A-Z]+/)?.[0] || '';
+        const numbers = query.match(/\d+/)?.[0] || '';
 
-        if (!courseMatch) {
-            // If no valid pattern, search in majorCourses if available
-            if (majorCourses.length > 0) {
-                const filtered = majorCourses.filter(c =>
-                    (c.value && c.value.includes(query.replace(/[A-Z]+\s*/, ''))) ||
-                    (c.title && c.title.toUpperCase().includes(query))
-                ).map(c => ({
-                    type: 'course',
-                    data: {
-                        id: `${selectedMajor}-${c.value}`,
-                        code: `${selectedMajor.toUpperCase()} ${c.value}`,
-                        title: c.title || 'Course',
-                        term: 'Spring 2025',
-                        description: `${selectedMajor.toUpperCase()} ${c.value} - ${c.title || 'Course details'}`,
-                        metrics: { difficulty: 3.5, workload: 8, fairness: 4.0, clarity: 4.0, n: 0 },
-                        assessment: [],
-                        tips: [],
-                        resources: []
-                    }
-                }));
-                setSearchResults(filtered);
-            }
+        // Need at least 1 letter to search
+        if (letters.length < 1) {
+            setSearchResults([]);
             return;
         }
 
-        const dept = courseMatch[1].toLowerCase();
-        const courseNum = courseMatch[2];
+        const dept = letters.toLowerCase();
 
         const timer = setTimeout(async () => {
             setSearchLoading(true);
@@ -222,9 +203,12 @@ function App() {
                 if (Array.isArray(courses)) {
                     let filtered = courses;
 
-                    // If course number specified, filter to that course
-                    if (courseNum) {
-                        filtered = courses.filter(c => c.value === courseNum || c.text === courseNum);
+                    // If course number typed, filter courses that start with those digits
+                    if (numbers) {
+                        filtered = courses.filter(c =>
+                            (c.value && c.value.startsWith(numbers)) ||
+                            (c.text && c.text.startsWith(numbers))
+                        );
                     }
 
                     // Transform to result format
@@ -245,6 +229,8 @@ function App() {
                         }
                     }));
                     setSearchResults(results);
+                } else {
+                    setSearchResults([]);
                 }
             } catch (error) {
                 console.error('Search failed:', error);
@@ -252,10 +238,10 @@ function App() {
             } finally {
                 setSearchLoading(false);
             }
-        }, 300); // Debounce 300ms
+        }, 200); // Debounce 200ms for faster response
 
         return () => clearTimeout(timer);
-    }, [search, majorCourses, selectedMajor]);
+    }, [search]);
 
     // Filter results by active tab
     const results = useMemo(() => {
