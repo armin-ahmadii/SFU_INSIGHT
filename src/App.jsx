@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import {
     Search, BookOpen, Star, User, Lock, ExternalLink,
     ThumbsUp, X, Bookmark, BarChart2, MessageSquare,
-    CheckCircle, Zap, ShieldCheck, ArrowRight
+    CheckCircle, Zap, ShieldCheck, ArrowRight, ChevronRight
 } from 'lucide-react';
 
 import { SignedIn, SignedOut, SignInButton, UserButton, useUser, useClerk } from '@clerk/clerk-react';
@@ -33,6 +33,54 @@ const COURSES = [
             { id: 'r2', type: 'Notes', title: 'Cheatsheet for Final Exam', url: '#', votes: 128 },
             { id: 'r3', type: 'Practice', title: 'LeetCode List for 225', url: '#', votes: 89 },
         ]
+    },
+    {
+        id: 'c_arch131',
+        code: 'ARCH 131',
+        title: 'Human Origins',
+        term: 'Spring 2026',
+        description: 'A survey of human evolution and our non-human primate relatives.',
+        metrics: { difficulty: 2.5, workload: 6, fairness: 4.2, clarity: 4.5, n: 85 },
+        assessment: ['Midterm: 30%', 'Final: 40%', 'Lab Quizzes: 30%'],
+        harderThanPrereqs: 15,
+        tips: ['Memorize the skull features.', 'Labs are super fun, dont miss them.'],
+        resources: []
+    },
+    {
+        id: 'c_arch101',
+        code: 'ARCH 101',
+        title: 'Ancient Civilizations',
+        term: 'Spring 2026',
+        description: 'Rise of ancient civilizations around the globe.',
+        metrics: { difficulty: 2.0, workload: 5, fairness: 4.5, clarity: 4.8, n: 120 },
+        assessment: ['Midterm: 30%', 'Final: 40%', 'Paper: 30%'],
+        harderThanPrereqs: 10,
+        tips: ['Watch the documentaries.'],
+        resources: []
+    },
+    {
+        id: 'c_arch220',
+        code: 'ARCH 220',
+        title: 'Introduction to Archaeology',
+        term: 'Spring 2026',
+        description: 'Methods and theories in archaeology.',
+        metrics: { difficulty: 3.2, workload: 7, fairness: 4.0, clarity: 3.5, n: 60 },
+        assessment: ['Field work: 50%', 'Final: 50%'],
+        harderThanPrereqs: 30,
+        tips: ['Dress for the weather.'],
+        resources: []
+    },
+    {
+        id: 'c_acma101',
+        code: 'ACMA 101',
+        title: 'Introduction to Insurance',
+        term: 'Spring 2026',
+        description: 'Basic concepts of life insurance and mortality tables.',
+        metrics: { difficulty: 3.0, workload: 7, fairness: 4.0, clarity: 3.9, n: 42 },
+        assessment: ['Assignments: 20%', 'Midterm: 30%', 'Final: 50%'],
+        harderThanPrereqs: 25,
+        tips: ['Keep up with the probability theory.'],
+        resources: []
     },
     {
         id: 'c2',
@@ -155,22 +203,138 @@ function App() {
         });
     }, [search, majors]);
 
-    const [browseMode, setBrowseMode] = useState(false);
+    const [browseMode, setBrowseMode] = useState(true); // Default to true so 'A' loads on mount
     const [browseLetter, setBrowseLetter] = useState('A'); // Default to A
+
+    const [browseCourses, setBrowseCourses] = useState([]);
+    const [browseLoading, setBrowseLoading] = useState(false);
+    const [expandedBrowse, setExpandedBrowse] = useState(false); // UI State for expansion
+
+    // Fetch courses for Browse Mode
+    useEffect(() => {
+        // Allow 'All' or 'Courses' to trigger browse fetch
+        if (!browseMode || (activeTab !== 'Courses' && activeTab !== 'All')) {
+            return;
+        }
+
+        const fetchBrowseCourses = async () => {
+            setBrowseLoading(true);
+            try {
+                // 1. Identify valid departments starting with letter
+                const matchingDepts = majors.filter(m => {
+                    const name = m.text || m.value || '';
+                    return name.toUpperCase().startsWith(browseLetter);
+                });
+
+                // 2. Fetch courses from API (DISABLED FOR DEBUGGING TO ISOLATE CRASH)
+
+                const promises = matchingDepts.map(async (major) => {
+                    const deptCode = (major.value || major.text || major).toLowerCase();
+
+                    // Use cache but ensure dept is attached
+                    if (courseCache[deptCode]) {
+                        return courseCache[deptCode].map(c => ({ ...c, dept: deptCode }));
+                    }
+
+                    try {
+                        const courses = await getCourses('2026', 'spring', deptCode);
+                        return Array.isArray(courses) ? courses.map(c => ({ ...c, dept: deptCode })) : [];
+                    } catch (e) {
+                        return [];
+                    }
+                });
+
+                const results = await Promise.all(promises);
+                let flattened = results.flat();
+
+                // let flattened = []; // Fallback to empty for API results
+
+                // 2.5: Inject Local Mocks if matching current browse letter
+                const localMatches = COURSES.filter(c => c.code.startsWith(browseLetter));
+                if (localMatches.length > 0) {
+                    const localMapped = localMatches.map(c => {
+                        const parts = c.code.split(' ');
+                        return {
+                            value: parts[1], // 225
+                            dept: parts[0] ? parts[0].toLowerCase() : 'unknown', // cmpt
+                            title: c.title,
+                            _isLocal: true, // Marker
+                            localData: c
+                        };
+                    });
+                    flattened = [...flattened, ...localMapped];
+                }
+
+                // Remove duplicates based on code
+                const uniqueCourses = [];
+                const seenCodes = new Set();
+                flattened.forEach(c => {
+                    const code = `${c.dept.toUpperCase()} ${c.value}`;
+                    if (!seenCodes.has(code)) {
+                        seenCodes.add(code);
+                        uniqueCourses.push(c);
+                    }
+                });
+
+                // 3. Sort Alphabetically by Code
+                const sorted = uniqueCourses.sort((a, b) => {
+                    const codeA = `${a.dept} ${a.value}`;
+                    const codeB = `${b.dept} ${b.value}`;
+                    return codeA.localeCompare(codeB);
+                });
+
+                // Map to unified structure
+                const mapped = sorted.map(c => ({
+                    type: 'course',
+                    name: `${c.dept.toUpperCase()} ${c.value}`,
+                    dept: c.dept.toUpperCase(),
+                    title: c.title,
+                    data: c._isLocal ? c.localData : {
+                        id: `${c.dept}-${c.value}`,
+                        code: `${c.dept.toUpperCase()} ${c.value}`,
+                        title: c.title || 'Course',
+                        term: 'Spring 2026',
+                        description: `${c.dept.toUpperCase()} ${c.value} - ${c.title}`,
+                        dept: c.dept,
+                        courseNum: c.value,
+                        metrics: { difficulty: 3.5, workload: 8, fairness: 4.0, clarity: 4.0, n: 0 },
+                        assessment: [],
+                        tips: [],
+                        resources: []
+                    }
+                }));
+
+                setBrowseCourses(mapped);
+
+            } catch (error) {
+                console.error("Browse fetch failed", error);
+                setBrowseCourses([]);
+            } finally {
+                setBrowseLoading(false);
+            }
+        };
+
+        const timer = setTimeout(fetchBrowseCourses, 300); // 300ms debounce
+        return () => clearTimeout(timer);
+    }, [browseMode, browseLetter, activeTab, majors, courseCache]);
+
 
     // Derived browse results
     const browseResults = useMemo(() => {
         if (!browseMode) return [];
-        if (activeTab === 'Courses') { // Browsing Departments/Majors
-            return majors.filter(m => {
-                const name = m.text || m.value || '';
-                return name.toUpperCase().startsWith(browseLetter);
-            }).sort((a, b) => (a.text || '').localeCompare(b.text || ''));
+        // Treat 'All' as 'Courses' when in browse mode for simplicity
+        if (activeTab === 'Courses' || activeTab === 'All') {
+            return browseCourses;
         } else if (activeTab === 'Professors') {
             return professors.filter(p => p.name.toUpperCase().startsWith(browseLetter)).sort((a, b) => a.name.localeCompare(b.name));
         }
         return [];
-    }, [activeTab, browseLetter, majors, browseMode]);
+    }, [activeTab, browseLetter, majors, browseMode, browseCourses, professors]);
+
+    // View Logic
+    // If expanding, show all. If not, show top 3.
+    const displayResults = expandedBrowse ? browseResults : browseResults.slice(0, 3);
+
     // Fetch departments (majors) on component mount - using same API as Scheduler
     // Fetch departments and professors on component mount
     useEffect(() => {
@@ -197,6 +361,8 @@ function App() {
             } catch (error) {
                 // Fallback departments
                 setMajors([
+                    { value: 'arch', text: 'ARCH', name: 'Archaeology' },
+                    { value: 'acma', text: 'ACMA', name: 'Actuarial Science' },
                     { value: 'cmpt', text: 'CMPT', name: 'Computing Science' },
                     { value: 'macm', text: 'MACM', name: 'Mathematics and Computing' },
                     { value: 'math', text: 'MATH', name: 'Mathematics' },
@@ -206,7 +372,10 @@ function App() {
                     { value: 'stat', text: 'STAT', name: 'Statistics' },
                     { value: 'econ', text: 'ECON', name: 'Economics' },
                     { value: 'bus', text: 'BUS', name: 'Business' },
-                    { value: 'psyc', text: 'PSYC', name: 'Psychology' }
+                    { value: 'psyc', text: 'PSYC', name: 'Psychology' },
+                    { value: 'eng', text: 'ENG', name: 'English' },
+                    { value: 'hist', text: 'HIST', name: 'History' },
+                    { value: 'iat', text: 'IAT', name: 'Interactive Arts & Tech' }
                 ]);
             } finally {
                 setLoadingMajors(false);
@@ -882,43 +1051,88 @@ function App() {
                                 </div>
 
                                 <div className="divide-y divide-gray-50">
-                                    {browseResults.length > 0 ? (
-                                        browseResults.map((item, idx) => (
-                                            activeTab === 'Professors' ? (
-                                                <div key={idx} className="p-4 hover:bg-gray-50 flex items-center justify-between group cursor-pointer transition-colors">
-                                                    <div className="flex items-center gap-4">
-                                                        <div className="w-10 h-10 rounded-full bg-red-50 text-[#a6192e] flex items-center justify-center font-bold">
-                                                            {item.name.charAt(0)}
+                                    {browseLoading ? (
+                                        <div className="p-12 text-center text-gray-400">Loading courses...</div>
+                                    ) : browseResults.length > 0 ? (
+                                        <>
+                                            {displayResults.map((item, idx) => (
+                                                activeTab === 'Professors' ? (
+                                                    <div key={item.id || idx} className="p-4 hover:bg-gray-50 flex items-center justify-between group cursor-pointer transition-colors border-b border-gray-50 last:border-0"
+                                                        onClick={() => setSelectedItem({ ...item, type: 'prof' })}
+                                                    >
+                                                        <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-6 flex-1">
+                                                            <div className="flex items-center gap-3 min-w-[200px]">
+                                                                <div className="w-8 h-8 rounded-full bg-red-50 text-[#a6192e] flex items-center justify-center font-bold text-xs">
+                                                                    {item.name?.charAt(0) || '?'}
+                                                                </div>
+                                                                <div>
+                                                                    <span className="text-xs text-gray-400 uppercase tracking-wider block">Professor</span>
+                                                                    <h4 className="font-bold text-gray-800 group-hover:text-[#a6192e] transition-colors">{item.name}</h4>
+                                                                </div>
+                                                            </div>
+
+                                                            <div className="min-w-[120px]">
+                                                                <span className="text-xs text-gray-400 uppercase tracking-wider block">Course</span>
+                                                                <span className="text-sm font-medium text-gray-600">{item.dept || item.course || 'N/A'}</span>
+                                                            </div>
+
+                                                            <div>
+                                                                <span className="text-xs text-gray-400 uppercase tracking-wider block">Difficulty</span>
+                                                                <span className={`text-sm font-bold px-2 py-0.5 rounded ${getLevelColor(item.metrics?.helpfulness || 4.5)}`}>
+                                                                    {item.metrics?.helpfulness || '4.5'}/5
+                                                                </span>
+                                                            </div>
                                                         </div>
-                                                        <div>
-                                                            <h4 className="font-bold text-gray-800 group-hover:text-[#a6192e] transition-colors">{item.name}</h4>
-                                                            <p className="text-sm text-gray-500">{item.dept} Department</p>
+
+                                                        <div className="flex items-center gap-2 text-sm text-gray-400 group-hover:text-[#a6192e] pl-4">
+                                                            Details <ChevronRight size={16} />
                                                         </div>
                                                     </div>
-                                                    <ChevronRight size={18} className="text-gray-300 group-hover:text-[#a6192e]" />
-                                                </div>
-                                            ) : (
-                                                <div
-                                                    key={idx}
-                                                    className="p-4 hover:bg-gray-50 flex items-center justify-between group cursor-pointer transition-colors"
-                                                    onClick={() => {
-                                                        // When browsing departments, select it to view courses
-                                                        setSelectedMajor(item.value || item);
-                                                        window.scrollTo({ top: 0, behavior: 'smooth' });
-                                                    }}
+                                                ) : (
+                                                    // Course Item (Alphabetical)
+                                                    <div
+                                                        key={item?.data?.id || idx}
+                                                        className="p-4 hover:bg-gray-50 flex items-center justify-between group cursor-pointer transition-colors border-b border-gray-50 last:border-0"
+                                                        onClick={() => item?.data && setSelectedItem(item.data)}
+                                                    >
+                                                        <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-6 flex-1">
+                                                            <div className="min-w-[150px]">
+                                                                <span className="text-xs text-gray-400 uppercase tracking-wider block">Course</span>
+                                                                <h4 className="font-bold text-gray-800 group-hover:text-[#a6192e] transition-colors text-lg">
+                                                                    {item?.data?.code}
+                                                                </h4>
+                                                            </div>
+
+                                                            <div className="flex-1">
+                                                                <span className="text-xs text-gray-400 uppercase tracking-wider block">Title</span>
+                                                                <p className="text-sm text-gray-600 line-clamp-1">{item?.data?.title}</p>
+                                                            </div>
+
+                                                            <div className="min-w-[100px]">
+                                                                <span className="text-xs text-gray-400 uppercase tracking-wider block">Difficulty</span>
+                                                                <span className={`text-sm font-bold px-2 py-0.5 rounded ${getLevelColor(item?.data?.metrics?.difficulty || 3.5)}`}>
+                                                                    {item?.data?.metrics?.difficulty || '3.5'}/5
+                                                                </span>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="flex items-center gap-2 text-sm text-gray-400 group-hover:text-[#a6192e] pl-4">
+                                                            Details <ChevronRight size={16} />
+                                                        </div>
+                                                    </div>
+                                                )
+                                            ))}
+
+                                            {/* Expansion Button */}
+                                            {!expandedBrowse && browseResults.length > 3 && (
+                                                <button
+                                                    onClick={() => setExpandedBrowse(true)}
+                                                    className="w-full py-4 text-center text-[#a6192e] font-bold hover:bg-red-50 transition-colors flex items-center justify-center gap-2 border-t border-dashed border-gray-200"
                                                 >
-                                                    <div>
-                                                        <h4 className="font-bold text-gray-800 group-hover:text-[#a6192e] transition-colors text-lg">
-                                                            {item.text || item.value || item}
-                                                        </h4>
-                                                        {item.name && <p className="text-sm text-gray-500">{item.name}</p>}
-                                                    </div>
-                                                    <div className="flex items-center gap-2 text-sm text-gray-400 group-hover:text-[#a6192e]">
-                                                        View Courses <ChevronRight size={16} />
-                                                    </div>
-                                                </div>
-                                            )
-                                        ))
+                                                    View {browseResults.length - 3} more {activeTab === 'Courses' ? 'courses' : 'professors'} <ChevronRight size={16} className="rotate-90" />
+                                                </button>
+                                            )}
+                                        </>
                                     ) : (
                                         <div className="p-12 text-center text-gray-400 flex flex-col items-center gap-3">
                                             <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center">
@@ -948,78 +1162,123 @@ function App() {
                                     <X size={24} />
                                 </button>
 
-                                {/* Modal Header */}
-                                <div className="p-6 md:p-8 border-b border-gray-100 bg-gray-50">
-                                    <div className="flex items-start justify-between mb-2">
-                                        <div>
-                                            <h2 className="text-3xl font-bold text-gray-900">{selectedItem.code}</h2>
-                                            <h3 className="text-lg text-gray-600">{selectedItem.title}</h3>
+                                {/* Modal Body - Conditional Render for Course vs Prof */}
+                                {selectedItem.type === 'prof' ? (
+                                    <div className="p-6 md:p-8">
+                                        <div className="flex items-center gap-4 mb-6">
+                                            <div className="w-20 h-20 rounded-full bg-red-50 text-[#a6192e] flex items-center justify-center text-3xl font-bold">
+                                                {selectedItem.name.charAt(0)}
+                                            </div>
+                                            <div>
+                                                <h2 className="text-2xl font-bold text-gray-900">{selectedItem.name}</h2>
+                                                <p className="text-lg text-gray-600 font-medium">{selectedItem.dept} Department</p>
+                                            </div>
                                         </div>
-                                        <div className={`px-3 py-1 rounded-full text-sm font-bold ${getLevelColor(selectedItem.metrics.difficulty)
-                                            }`}>
-                                            Difficulty: {selectedItem.metrics.difficulty}/5
+
+                                        <div className="grid grid-cols-2 gap-4 mb-8">
+                                            <div className="bg-gray-50 p-4 rounded-xl text-center border border-gray-100">
+                                                <div className="text-sm text-gray-500 uppercase tracking-wide mb-1">Helpfulness</div>
+                                                <div className="text-3xl font-bold text-[#a6192e]">
+                                                    {selectedItem.metrics?.helpfulness || 4.5}
+                                                </div>
+                                            </div>
+                                            <div className="bg-gray-50 p-4 rounded-xl text-center border border-gray-100">
+                                                <div className="text-sm text-gray-500 uppercase tracking-wide mb-1">Total Ratings</div>
+                                                <div className="text-3xl font-bold text-gray-900">
+                                                    {Math.floor(Math.random() * 50) + 10}
+                                                </div>
+                                            </div>
                                         </div>
-                                    </div>
-                                    <p className="text-gray-500 text-sm mb-4 leading-relaxed">{selectedItem.description}</p>
 
-                                    <div className="flex gap-4 text-sm text-gray-600">
-                                        <div className="flex items-center gap-1.5"><CheckCircle size={16} className="text-green-600" /> {selectedItem.term}</div>
-                                        <div className="flex items-center gap-1.5"><User size={16} /> {selectedItem.metrics.n} Reviews</div>
-                                    </div>
-                                </div>
-
-                                {/* Unlocked Content */}
-                                <div className="p-6 md:p-8 grid md:grid-cols-2 gap-8">
-
-                                    {/* Left Column: Stats */}
-                                    <div className="space-y-6">
-                                        <StatBar label="Avg Workload" value={`${selectedItem.metrics.workload} h/week`} percent={selectedItem.metrics.workload * 5} color="bg-blue-500" />
-                                        <StatBar label="Fairness" value={selectedItem.metrics.fairness} percent={(selectedItem.metrics.fairness / 5) * 100} color="bg-emerald-500" />
-                                        <StatBar label="Clarity" value={selectedItem.metrics.clarity} percent={(selectedItem.metrics.clarity / 5) * 100} color="bg-purple-500" />
-
-                                        <div className="p-4 bg-orange-50 rounded-lg border border-orange-100">
-                                            <h4 className="font-bold text-orange-900 text-sm mb-2">Assessment</h4>
-                                            <div className="flex flex-wrap gap-2">
-                                                {selectedItem.assessment.map(a => (
-                                                    <span key={a} className="bg-white px-2 py-1 rounded text-xs font-medium text-orange-800 border border-orange-100 shadow-sm">{a}</span>
+                                        <div className="mb-8">
+                                            <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                                                <Star size={18} className="text-yellow-500" /> Top Feedback
+                                            </h3>
+                                            <div className="space-y-3">
+                                                {['Clear lectures but fast paced', 'Very approachable during office hours', 'Exams are tough but fair'].map((tag, i) => (
+                                                    <div key={i} className="flex items-center gap-2 text-gray-700 bg-white p-3 border border-gray-100 rounded-lg shadow-sm">
+                                                        <MessageSquare size={16} className="text-gray-400" />
+                                                        "{tag}"
+                                                    </div>
                                                 ))}
                                             </div>
                                         </div>
+
+                                        <button className="w-full btn btn-primary py-3">
+                                            View Full Profile
+                                        </button>
                                     </div>
-
-                                    {/* Right Column: Protected Content */}
-                                    {/* Right Column: Protected Content -> Call to Action */}
-                                    <div className="flex flex-col justify-center h-full space-y-6">
-                                        <div className="bg-gradient-to-br from-red-50 to-white p-6 rounded-2xl border border-red-100 shadow-sm">
-                                            <h4 className="text-lg font-bold text-gray-900 mb-2">Want the A+ blueprint?</h4>
-                                            <p className="text-sm text-gray-600 mb-6 leading-relaxed">
-                                                Access our curated guide for <b>{selectedItem.code}</b>. Includes community notes, video tutorials, and past syllabi.
-                                            </p>
-
-                                            <button
-                                                onClick={() => {
-                                                    setSelectedItem(selectedItem); // Keep context
-                                                    setCurrentView('success-guide');
-                                                }}
-                                                className="w-full group relative flex items-center justify-center gap-3 py-3 bg-[#a6192e] hover:bg-[#8a1526] text-white rounded-xl font-bold shadow-lg shadow-red-900/10 hover:shadow-xl hover:shadow-red-900/20 transition-all transform hover:-translate-y-0.5"
-                                            >
-                                                <span>How to succeed in {selectedItem.code.split(' ')[0]}</span>
-                                                <div className="bg-white/20 p-1 rounded-full group-hover:translate-x-1 transition-transform">
-                                                    <ArrowRight size={16} />
+                                ) : (
+                                    /* Course Modal Content */
+                                    <>
+                                        <div className="p-6 md:p-8 border-b border-gray-100 bg-gray-50">
+                                            <div className="flex items-start justify-between mb-2">
+                                                <div>
+                                                    <h2 className="text-3xl font-bold text-gray-900">{selectedItem.code}</h2>
+                                                    <h3 className="text-lg text-gray-600">{selectedItem.title}</h3>
                                                 </div>
-                                            </button>
+                                                <div className={`px-3 py-1 rounded-full text-sm font-bold ${getLevelColor(selectedItem.metrics.difficulty)
+                                                    }`}>
+                                                    Difficulty: {selectedItem.metrics.difficulty}/5
+                                                </div>
+                                            </div>
+                                            <p className="text-gray-500 text-sm mb-4 leading-relaxed">{selectedItem.description}</p>
 
-                                            <div className="mt-4 text-center">
-                                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Powered by Crowd Data</span>
+                                            <div className="flex gap-4 text-sm text-gray-600">
+                                                <div className="flex items-center gap-1.5"><CheckCircle size={16} className="text-green-600" /> {selectedItem.term}</div>
+                                                <div className="flex items-center gap-1.5"><User size={16} /> {selectedItem.metrics.n} Reviews</div>
                                             </div>
                                         </div>
-                                    </div>
-                                </div>
 
-                                {!hasContributed && (
-                                    <div className="bg-amber-50 p-3 text-center text-xs font-medium text-amber-800 border-t border-amber-100 rounded-b-lg">
-                                        <span className="font-bold">2,402 students</span> unlocked insights this week.
-                                    </div>
+                                        <div className="p-6 md:p-8 grid md:grid-cols-2 gap-8">
+                                            <div className="space-y-6">
+                                                <StatBar label="Avg Workload" value={`${selectedItem.metrics.workload} h/week`} percent={selectedItem.metrics.workload * 5} color="bg-blue-500" />
+                                                <StatBar label="Fairness" value={selectedItem.metrics.fairness} percent={(selectedItem.metrics.fairness / 5) * 100} color="bg-emerald-500" />
+                                                <StatBar label="Clarity" value={selectedItem.metrics.clarity} percent={(selectedItem.metrics.clarity / 5) * 100} color="bg-purple-500" />
+
+                                                <div className="p-4 bg-orange-50 rounded-lg border border-orange-100">
+                                                    <h4 className="font-bold text-orange-900 text-sm mb-2">Assessment</h4>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {selectedItem.assessment.map(a => (
+                                                            <span key={a} className="bg-white px-2 py-1 rounded text-xs font-medium text-orange-800 border border-orange-100 shadow-sm">{a}</span>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="flex flex-col justify-center h-full space-y-6">
+                                                <div className="bg-gradient-to-br from-red-50 to-white p-6 rounded-2xl border border-red-100 shadow-sm">
+                                                    <h4 className="text-lg font-bold text-gray-900 mb-2">Want the A+ blueprint?</h4>
+                                                    <p className="text-sm text-gray-600 mb-6 leading-relaxed">
+                                                        Access our curated guide for <b>{selectedItem.code}</b>. Includes community notes, video tutorials, and past syllabi.
+                                                    </p>
+
+                                                    <button
+                                                        onClick={() => {
+                                                            setSelectedItem(selectedItem); // Keep context
+                                                            setCurrentView('success-guide');
+                                                        }}
+                                                        className="w-full group relative flex items-center justify-center gap-3 py-3 bg-[#a6192e] hover:bg-[#8a1526] text-white rounded-xl font-bold shadow-lg shadow-red-900/10 hover:shadow-xl hover:shadow-red-900/20 transition-all transform hover:-translate-y-0.5"
+                                                    >
+                                                        <span>How to succeed in {selectedItem.code.split(' ')[0]}</span>
+                                                        <div className="bg-white/20 p-1 rounded-full group-hover:translate-x-1 transition-transform">
+                                                            <ArrowRight size={16} />
+                                                        </div>
+                                                    </button>
+
+                                                    <div className="mt-4 text-center">
+                                                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Powered by Crowd Data</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {!hasContributed && (
+                                            <div className="bg-amber-50 p-3 text-center text-xs font-medium text-amber-800 border-t border-amber-100 rounded-b-lg">
+                                                <span className="font-bold">2,402 students</span> unlocked insights this week.
+                                            </div>
+                                        )}
+                                    </>
                                 )}
                             </div>
                         </div>
