@@ -1,7 +1,7 @@
 import React from 'react';
-import { ArrowLeft, BookOpen, Bookmark, Trash2, Star, Clock } from 'lucide-react';
+import { ArrowLeft, BookOpen, Bookmark, Trash2, Star, Clock, Loader2 } from 'lucide-react';
 
-export default function SavedCourses({ savedCourses, onBack, onSelectCourse, onRemoveCourse }) {
+export default function SavedCourses({ savedCourses, onBack, onSelectCourse, onRemoveCourse, loading }) {
     const courses = savedCourses || [];
 
     return (
@@ -42,7 +42,7 @@ export default function SavedCourses({ savedCourses, onBack, onSelectCourse, onR
                                 Saved Courses
                             </h1>
                             <p style={{ fontSize: '14px', color: 'rgba(255,255,255,0.7)', margin: '4px 0 0' }}>
-                                {courses.length} course{courses.length !== 1 ? 's' : ''} saved
+                                {loading ? 'Loading...' : `${courses.length} course${courses.length !== 1 ? 's' : ''} saved`}
                             </p>
                         </div>
                     </div>
@@ -51,8 +51,24 @@ export default function SavedCourses({ savedCourses, onBack, onSelectCourse, onR
 
             <div style={{ maxWidth: '896px', margin: '0 auto', padding: '32px 24px' }}>
 
+                {/* Loading State */}
+                {loading && (
+                    <div style={{
+                        backgroundColor: 'white',
+                        borderRadius: '20px',
+                        padding: '60px 40px',
+                        textAlign: 'center',
+                        border: '1px solid #e5e7eb',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.05)'
+                    }}>
+                        <Loader2 size={40} color="#a6192e" style={{ animation: 'spin 1s linear infinite', margin: '0 auto 16px' }} />
+                        <p style={{ fontSize: '15px', color: '#6b7280' }}>Loading your saved courses...</p>
+                        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+                    </div>
+                )}
+
                 {/* Empty State */}
-                {courses.length === 0 && (
+                {!loading && courses.length === 0 && (
                     <div style={{
                         backgroundColor: 'white',
                         borderRadius: '20px',
@@ -83,7 +99,7 @@ export default function SavedCourses({ savedCourses, onBack, onSelectCourse, onR
                 )}
 
                 {/* Course List */}
-                {courses.length > 0 && (
+                {!loading && courses.length > 0 && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                         {courses.map((course, index) => (
                             <div

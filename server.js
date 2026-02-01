@@ -509,6 +509,91 @@ app.get('/api/contributions/:courseCode/my-votes', requireAuth, async (req, res)
     }
 });
 
+// --- SAVED COURSES ROUTES ---
+
+// 12. Get user's saved courses
+app.get('/api/saved-courses', requireAuth, async (req, res) => {
+    try {
+        if (!supabase) {
+            return res.json([]);
+        }
+
+        const { data, error } = await supabase
+            .from('saved_courses')
+            .select('*')
+            .eq('user_id', req.userId)
+            .order('created_at', { ascending: false });
+
+        if (error) throw error;
+
+        res.json(data || []);
+    } catch (error) {
+        console.error('Error fetching saved courses:', error);
+        res.status(500).json({ error: 'Failed to fetch saved courses' });
+    }
+});
+
+// 13. Save a course
+app.post('/api/saved-courses', requireAuth, async (req, res) => {
+    try {
+        if (!supabase) {
+            return res.status(503).json({ error: 'Database not configured' });
+        }
+
+        const { courseId, courseCode, courseTitle, courseData } = req.body;
+
+        if (!courseId || !courseCode) {
+            return res.status(400).json({ error: 'courseId and courseCode required' });
+        }
+
+        // Upsert to handle duplicate saves gracefully
+        const { data, error } = await supabase
+            .from('saved_courses')
+            .upsert({
+                user_id: req.userId,
+                course_id: courseId,
+                course_code: courseCode,
+                course_title: courseTitle || courseCode,
+                course_data: courseData || null
+            }, { onConflict: 'user_id,course_id' })
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        console.log(`[SAVED] User ${req.userId} saved course ${courseCode}`);
+        res.json({ success: true, savedCourse: data });
+    } catch (error) {
+        console.error('Error saving course:', error);
+        res.status(500).json({ error: 'Failed to save course' });
+    }
+});
+
+// 14. Unsave a course
+app.delete('/api/saved-courses/:courseId', requireAuth, async (req, res) => {
+    try {
+        if (!supabase) {
+            return res.status(503).json({ error: 'Database not configured' });
+        }
+
+        const { courseId } = req.params;
+
+        const { error } = await supabase
+            .from('saved_courses')
+            .delete()
+            .eq('user_id', req.userId)
+            .eq('course_id', courseId);
+
+        if (error) throw error;
+
+        console.log(`[UNSAVED] User ${req.userId} unsaved course ${courseId}`);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error unsaving course:', error);
+        res.status(500).json({ error: 'Failed to unsave course' });
+    }
+});
+
 app.listen(PORT, () => {
     console.log(`Proxy server running on http://localhost:${PORT}`);
 });

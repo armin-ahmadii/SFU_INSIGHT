@@ -5,12 +5,14 @@ import {
     CheckCircle, Zap, ShieldCheck, ArrowRight, ChevronRight, AlertCircle
 } from 'lucide-react';
 
-import { SignedIn, SignedOut, SignInButton, UserButton, useUser, useClerk } from '@clerk/clerk-react';
+import { SignedIn, SignedOut, SignInButton, UserButton, useUser, useClerk, useAuth } from '@clerk/clerk-react';
 import { getDepartments, getCourses, startProfessorAggregation } from './api/sfuScheduleApi';
+import { getSavedCourses, saveCourse, unsaveCourse } from './api/savedCourses';
 import Scheduler from './components/Scheduler';
 import CourseSuccessGuide from './components/CourseSuccessGuide';
 import SavedCourses from './components/SavedCourses';
 import { CMPT_225_DATA, isCMPT225 } from './data/demoData';
+
 
 
 // --- MOCK DATA ---
@@ -137,35 +139,17 @@ const PROFS = [
 function App() {
     const { user, isLoaded, isSignedIn } = useUser();
     const { openSignIn } = useClerk();
+    const { getToken } = useAuth();
 
     const [search, setSearch] = useState('');
     const [activeTab, setActiveTab] = useState('All'); // All, Courses, Professors
     const [selectedItem, setSelectedItem] = useState(null); // For modal
-    const [savedCourses, setSavedCourses] = useState(() => {
-        // Load from localStorage on initial mount
-        const stored = localStorage.getItem('sfu_insight_saved_courses');
-        if (stored) {
-            try {
-                const parsed = JSON.parse(stored);
-                return Array.isArray(parsed) ? parsed : [];
-            } catch (e) {
-                return [];
-            }
-        }
-        return [];
-    });
-    const [savedCoursesData, setSavedCoursesData] = useState(() => {
-        // Load full course data from localStorage
-        const stored = localStorage.getItem('sfu_insight_saved_courses_data');
-        if (stored) {
-            try {
-                return JSON.parse(stored) || {};
-            } catch (e) {
-                return {};
-            }
-        }
-        return {};
-    });
+
+    // Saved courses - loaded from database (no localStorage caching)
+    const [savedCourses, setSavedCourses] = useState([]);
+    const [savedCoursesData, setSavedCoursesData] = useState({});
+    const [savedCoursesLoading, setSavedCoursesLoading] = useState(false);
+
     const [showContributionForm, setShowContributionForm] = useState(false);
     const [resourceVotes, setResourceVotes] = useState({});
     const [majors, setMajors] = useState([]);
@@ -206,6 +190,45 @@ function App() {
     // Professor's current courses (from SFU)
     const [profCourses, setProfCourses] = useState([]);
     const [profCoursesLoading, setProfCoursesLoading] = useState(false);
+
+    // Load saved courses from database when user logs in
+    useEffect(() => {
+        const loadSavedCourses = async () => {
+            if (!isSignedIn || !isLoaded) {
+                // Clear saved courses when logged out
+                setSavedCourses([]);
+                setSavedCoursesData({});
+                return;
+            }
+
+            setSavedCoursesLoading(true);
+            try {
+                const token = await getToken();
+                if (!token) return;
+
+                const dbSavedCourses = await getSavedCourses(token);
+
+                const dbIds = (dbSavedCourses || []).map(c => c.course_id);
+                const dbData = {};
+                (dbSavedCourses || []).forEach(c => {
+                    dbData[c.course_id] = c.course_data || {
+                        id: c.course_id,
+                        code: c.course_code,
+                        title: c.course_title
+                    };
+                });
+
+                setSavedCourses(dbIds);
+                setSavedCoursesData(dbData);
+            } catch (error) {
+                console.log('Could not load saved courses:', error);
+            } finally {
+                setSavedCoursesLoading(false);
+            }
+        };
+
+        loadSavedCourses();
+    }, [isSignedIn, isLoaded, getToken]);
 
     // Fetch RMP data and professor courses when a professor is selected
     useEffect(() => {
@@ -620,28 +643,62 @@ function App() {
         return searchResults;
     }, [searchResults, activeTab]);
 
-    const toggleSave = (e, courseId, courseData) => {
+    const toggleSave = async (e, courseId, courseData) => {
         e.stopPropagation();
+
+        // Require sign-in to save courses
+        if (!isSignedIn) {
+            openSignIn({
+                afterSignInUrl: window.location.href,
+                afterSignUpUrl: window.location.href
+            });
+            return;
+        }
+
         const isSaved = savedCourses.includes(courseId);
-        if (isSaved) {
-            // Remove
-            const nextIds = savedCourses.filter(id => id !== courseId);
-            setSavedCourses(nextIds);
-            localStorage.setItem('sfu_insight_saved_courses', JSON.stringify(nextIds));
-            // Remove from data
-            const nextData = { ...savedCoursesData };
-            delete nextData[courseId];
-            setSavedCoursesData(nextData);
-            localStorage.setItem('sfu_insight_saved_courses_data', JSON.stringify(nextData));
-        } else {
-            // Add
-            const nextIds = [...savedCourses, courseId];
-            setSavedCourses(nextIds);
-            localStorage.setItem('sfu_insight_saved_courses', JSON.stringify(nextIds));
-            // Add to data
-            const nextData = { ...savedCoursesData, [courseId]: courseData };
-            setSavedCoursesData(nextData);
-            localStorage.setItem('sfu_insight_saved_courses_data', JSON.stringify(nextData));
+
+        try {
+            const token = await getToken();
+            if (!token) return;
+
+            if (isSaved) {
+                // Optimistic UI update
+                setSavedCourses(prev => prev.filter(id => id !== courseId));
+                setSavedCoursesData(prev => {
+                    const next = { ...prev };
+                    delete next[courseId];
+                    return next;
+                });
+
+                // Remove from database
+                await unsaveCourse(courseId, token);
+            } else {
+                // Optimistic UI update
+                setSavedCourses(prev => [...prev, courseId]);
+                setSavedCoursesData(prev => ({ ...prev, [courseId]: courseData }));
+
+                // Save to database
+                await saveCourse({
+                    courseId,
+                    courseCode: courseData?.code || courseId,
+                    courseTitle: courseData?.title || courseData?.code || courseId,
+                    courseData
+                }, token);
+            }
+        } catch (err) {
+            console.error('Error saving course:', err);
+            // Revert optimistic update on error - reload from DB
+            const token = await getToken();
+            if (token) {
+                const dbSavedCourses = await getSavedCourses(token);
+                const dbIds = (dbSavedCourses || []).map(c => c.course_id);
+                const dbData = {};
+                (dbSavedCourses || []).forEach(c => {
+                    dbData[c.course_id] = c.course_data || { id: c.course_id, code: c.course_code, title: c.course_title };
+                });
+                setSavedCourses(dbIds);
+                setSavedCoursesData(dbData);
+            }
         }
     };
 
@@ -760,14 +817,23 @@ function App() {
                     savedCourses={savedCourses.map(id => savedCoursesData[id]).filter(Boolean)}
                     onBack={() => setCurrentView('home')}
                     onSelectCourse={(course) => { setSelectedItem(course); setCurrentView('home'); }}
-                    onRemoveCourse={(id) => {
+                    onRemoveCourse={async (id) => {
+                        // Optimistic UI update
                         setSavedCourses(prev => prev.filter(cid => cid !== id));
                         setSavedCoursesData(prev => {
                             const next = { ...prev };
                             delete next[id];
                             return next;
                         });
+                        // Sync to database
+                        try {
+                            const token = await getToken();
+                            if (token) await unsaveCourse(id, token);
+                        } catch (err) {
+                            console.error('Error removing saved course:', err);
+                        }
                     }}
+                    loading={savedCoursesLoading}
                 />
             )}
 
