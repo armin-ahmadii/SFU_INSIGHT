@@ -159,7 +159,7 @@ export const CMPT_225_DATA = {
                 {
                     title: 'Abdul Bari - Algorithms',
                     description: 'Great for Big-O analysis and understanding why algorithms work.',
-                    link: 'https://www.youtube.com/c/AbdulBari'
+                    link: 'https://www.youtube.com/@abdul_bari'
                 }
             ],
             readings: [
