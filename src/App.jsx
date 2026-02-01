@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import {
     Search, BookOpen, Star, User, Lock, ExternalLink,
     ThumbsUp, X, Bookmark, BarChart2, MessageSquare,
-    CheckCircle, Zap, ShieldCheck, ArrowRight, ChevronRight
+    CheckCircle, Zap, ShieldCheck, ArrowRight, ChevronRight, AlertCircle
 } from 'lucide-react';
 
 import { SignedIn, SignedOut, SignInButton, UserButton, useUser, useClerk } from '@clerk/clerk-react';
@@ -189,6 +189,66 @@ function App() {
 
     const [courseCache, setCourseCache] = useState({}); // Cache courses by department
     const [showSuggestions, setShowSuggestions] = useState(false);
+
+    // RateMyProfessor integration
+    const [rmpData, setRmpData] = useState(null);
+    const [rmpLoading, setRmpLoading] = useState(false);
+    const [rmpError, setRmpError] = useState(false);
+
+    // Professor's current courses (from SFU)
+    const [profCourses, setProfCourses] = useState([]);
+    const [profCoursesLoading, setProfCoursesLoading] = useState(false);
+
+    // Fetch RMP data and professor courses when a professor is selected
+    useEffect(() => {
+        if (selectedItem?.type === 'prof' && selectedItem?.name) {
+            // Fetch RMP data
+            const fetchRmpData = async () => {
+                setRmpLoading(true);
+                setRmpData(null);
+                setRmpError(false);
+                try {
+                    const searchRes = await fetch(`http://localhost:3001/api/professors/search?name=${encodeURIComponent(selectedItem.name)}`);
+                    const searchResults = await searchRes.json();
+
+                    if (searchResults && searchResults.length > 0) {
+                        const profId = searchResults[0].id;
+                        const detailRes = await fetch(`http://localhost:3001/api/professors/${profId}`);
+                        const profDetails = await detailRes.json();
+                        setRmpData(profDetails);
+                    }
+                } catch (error) {
+                    console.error('Failed to fetch RMP data:', error);
+                    setRmpError(true);
+                } finally {
+                    setRmpLoading(false);
+                }
+            };
+
+            // Fetch professor's current courses
+            const fetchProfCourses = async () => {
+                setProfCoursesLoading(true);
+                try {
+                    const res = await fetch(`http://localhost:3001/api/instructor-courses?name=${encodeURIComponent(selectedItem.name)}`);
+                    const data = await res.json();
+                    setProfCourses(Array.isArray(data) ? data : []);
+                } catch (error) {
+                    console.error('Failed to fetch professor courses:', error);
+                    setProfCourses([]);
+                } finally {
+                    setProfCoursesLoading(false);
+                }
+            };
+
+            // Fetch both in parallel
+            fetchRmpData();
+            fetchProfCourses();
+        } else {
+            setRmpData(null);
+            setRmpError(false);
+            setProfCourses([]);
+        }
+    }, [selectedItem]);
 
     // Filter departments for autocomplete suggestions
     // Simplified department filtering - just returns matching depts for internal use
@@ -779,9 +839,9 @@ function App() {
                                                     <div
                                                         key={result.data.id}
                                                         onClick={() => {
-                                                            // For now, just select them or show an alert, or route to filtered view
-                                                            alert(`Selected Professor: ${result.data.name}`);
+                                                            setSelectedItem({ ...result.data, type: 'prof' });
                                                             setShowSuggestions(false);
+                                                            setSearch('');
                                                         }}
                                                         style={{
                                                             padding: '0.75rem 1.25rem',
@@ -1129,7 +1189,7 @@ function App() {
                                                     onClick={() => setExpandedBrowse(true)}
                                                     className="w-full py-4 text-center text-[#a6192e] font-bold hover:bg-red-50 transition-colors flex items-center justify-center gap-2 border-t border-dashed border-gray-200"
                                                 >
-                                                    View {browseResults.length - 3} more {activeTab === 'Courses' ? 'courses' : 'professors'} <ChevronRight size={16} className="rotate-90" />
+                                                    View {browseResults.length - 3} more {activeTab === 'Courses' ? 'options' : 'options'} <ChevronRight size={16} className="rotate-90" />
                                                 </button>
                                             )}
                                         </>
@@ -1175,38 +1235,112 @@ function App() {
                                             </div>
                                         </div>
 
-                                        <div className="grid grid-cols-2 gap-4 mb-8">
+                                        {/* RMP Error State */}
+                                        {rmpError && !rmpLoading && (
+                                            <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6 flex items-center justify-between">
+                                                <div className="flex items-center gap-3">
+                                                    <AlertCircle size={20} className="text-red-500" />
+                                                    <span className="text-sm text-red-700">Failed to load RateMyProfessors data</span>
+                                                </div>
+                                                <button
+                                                    onClick={() => setSelectedItem({ ...selectedItem })}
+                                                    className="text-xs font-bold text-red-600 hover:text-red-800 underline"
+                                                >
+                                                    Retry
+                                                </button>
+                                            </div>
+                                        )}
+
+                                        {/* RMP Stats Grid */}
+                                        <div className="grid grid-cols-2 gap-4 mb-6">
                                             <div className="bg-gray-50 p-4 rounded-xl text-center border border-gray-100">
-                                                <div className="text-sm text-gray-500 uppercase tracking-wide mb-1">Helpfulness</div>
+                                                <div className="text-sm text-gray-500 uppercase tracking-wide mb-1">Overall Rating</div>
                                                 <div className="text-3xl font-bold text-[#a6192e]">
-                                                    {selectedItem.metrics?.helpfulness || 4.5}
+                                                    {rmpLoading ? <span className="animate-pulse">...</span> : (rmpData?.avgRating?.toFixed(1) || 'N/A')}
                                                 </div>
                                             </div>
                                             <div className="bg-gray-50 p-4 rounded-xl text-center border border-gray-100">
-                                                <div className="text-sm text-gray-500 uppercase tracking-wide mb-1">Total Ratings</div>
+                                                <div className="text-sm text-gray-500 uppercase tracking-wide mb-1">Difficulty</div>
                                                 <div className="text-3xl font-bold text-gray-900">
-                                                    {Math.floor(Math.random() * 50) + 10}
+                                                    {rmpLoading ? <span className="animate-pulse">...</span> : (rmpData?.avgDifficulty?.toFixed(1) || 'N/A')}
                                                 </div>
                                             </div>
                                         </div>
 
-                                        <div className="mb-8">
-                                            <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
-                                                <Star size={18} className="text-yellow-500" /> Top Feedback
+                                        <div className="grid grid-cols-2 gap-4 mb-6">
+                                            <div className="bg-emerald-50 p-4 rounded-xl text-center border border-emerald-100">
+                                                <div className="text-sm text-gray-500 uppercase tracking-wide mb-1">Would Take Again</div>
+                                                <div className="text-2xl font-bold text-emerald-600">
+                                                    {rmpLoading ? <span className="animate-pulse">...</span> : (rmpData?.wouldTakeAgainPercent ? `${Math.round(rmpData.wouldTakeAgainPercent)}%` : 'N/A')}
+                                                </div>
+                                            </div>
+                                            <div className="bg-blue-50 p-4 rounded-xl text-center border border-blue-100">
+                                                <div className="text-sm text-gray-500 uppercase tracking-wide mb-1">Total Ratings</div>
+                                                <div className="text-2xl font-bold text-blue-600">
+                                                    {rmpLoading ? <span className="animate-pulse">...</span> : (rmpData?.numRatings || 0)}
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Tags */}
+                                        {rmpData?.teacherRatingTags && rmpData.teacherRatingTags.length > 0 && (
+                                            <div className="mb-6">
+                                                <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2 text-sm uppercase tracking-wide">
+                                                    <Star size={16} className="text-yellow-500" /> Student Feedback
+                                                </h3>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {rmpData.teacherRatingTags.slice(0, 5).map((tag, i) => (
+                                                        <span key={i} className="px-3 py-1.5 bg-white border border-gray-200 rounded-full text-sm font-medium text-gray-700">
+                                                            {tag.tagName}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Crowd-sourced Student Reviews */}
+                                        <div className="mb-6">
+                                            <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2 text-sm uppercase tracking-wide">
+                                                <MessageSquare size={16} className="text-[#a6192e]" /> Student Reviews
                                             </h3>
+
+                                            {/* Sample reviews - replace with actual data */}
                                             <div className="space-y-3">
-                                                {['Clear lectures but fast paced', 'Very approachable during office hours', 'Exams are tough but fair'].map((tag, i) => (
-                                                    <div key={i} className="flex items-center gap-2 text-gray-700 bg-white p-3 border border-gray-100 rounded-lg shadow-sm">
-                                                        <MessageSquare size={16} className="text-gray-400" />
-                                                        "{tag}"
+                                                {[
+                                                    { text: "Really knows their stuff. Exams are fair if you attend lectures.", rating: 4, helpful: 23, course: "CMPT 120", term: "Fall 2024" },
+                                                    { text: "Office hours were super helpful. Would take again!", rating: 5, helpful: 18, course: "CMPT 225", term: "Spring 2024" },
+                                                    { text: "Fast-paced but explains concepts well. Be ready to work hard.", rating: 4, helpful: 12, course: "CMPT 120", term: "Summer 2024" }
+                                                ].map((review, i) => (
+                                                    <div key={i} className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow">
+                                                        <div className="flex items-center justify-between mb-2">
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-xs font-medium bg-gray-100 text-gray-600 px-2 py-1 rounded">{review.course}</span>
+                                                                <span className="text-xs text-gray-400">{review.term}</span>
+                                                            </div>
+                                                            <div className="flex items-center gap-1">
+                                                                {[...Array(5)].map((_, j) => (
+                                                                    <Star key={j} size={12} className={j < review.rating ? "text-yellow-400 fill-yellow-400" : "text-gray-200"} />
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                        <p className="text-sm text-gray-700 leading-relaxed">"{review.text}"</p>
+                                                        <div className="flex items-center gap-2 mt-2 pt-2 border-t border-gray-100">
+                                                            <button className="flex items-center gap-1 text-xs text-gray-400 hover:text-[#a6192e] transition-colors">
+                                                                <ThumbsUp size={12} /> {review.helpful} found helpful
+                                                            </button>
+                                                        </div>
                                                     </div>
                                                 ))}
                                             </div>
-                                        </div>
 
-                                        <button className="w-full btn btn-primary py-3">
-                                            View Full Profile
-                                        </button>
+                                            {/* Add Review CTA */}
+                                            <button
+                                                onClick={() => setShowContributionForm(true)}
+                                                className="w-full mt-4 py-2.5 border-2 border-dashed border-gray-300 rounded-lg text-sm font-medium text-gray-500 hover:border-[#a6192e] hover:text-[#a6192e] transition-colors flex items-center justify-center gap-2"
+                                            >
+                                                <Star size={14} /> Share your experience with this professor
+                                            </button>
+                                        </div>
                                     </div>
                                 ) : (
                                     /* Course Modal Content */
