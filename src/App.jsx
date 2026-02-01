@@ -5,6 +5,9 @@ import {
     CheckCircle, Zap, ShieldCheck
 } from 'lucide-react';
 
+import { SignedIn, SignedOut, SignInButton, UserButton } from '@clerk/clerk-react';
+
+
 // --- MOCK DATA ---
 
 const COURSES = [
@@ -153,6 +156,7 @@ function App() {
         <div className="min-h-screen pb-20">
 
             {/* 1. Header */}
+            {/* 1. Header */}
             <header className="sticky top-0 z-40 bg-gradient-to-r from-red-700 via-red-600 to-red-700 border-b border-red-800 shadow-lg">
                 <div className="w-full px-8 h-24 flex items-center justify-between">
                     <div className="flex items-center gap-3 cursor-pointer" onClick={() => { setSearch(''); setSelectedItem(null); }}>
@@ -171,10 +175,24 @@ function App() {
                             <Bookmark size={24} />
                             <span>Explore</span>
                         </a>
-                        <a href="#" className="flex items-center gap-2.5 text-xl font-semibold text-white hover:text-white hover:scale-110 transition-all duration-200 hover:drop-shadow-lg">
-                            <User size={24} />
-                            <span>Login</span>
-                        </a>
+
+                        <SignedOut>
+                            <SignInButton mode="modal">
+                                <button className="flex items-center gap-2.5 text-xl font-semibold text-white hover:text-white hover:scale-110 transition-all duration-200 hover:drop-shadow-lg">
+                                    <User size={24} />
+                                    <span>Login</span>
+                                </button>
+                            </SignInButton>
+                        </SignedOut>
+                        <SignedIn>
+                            <div className="flex items-center gap-1.5">
+                                <UserButton afterSignOutUrl="/" appearance={{
+                                    elements: {
+                                        avatarBox: "w-10 h-10 ring-2 ring-white/50"
+                                    }
+                                }} />
+                            </div>
+                        </SignedIn>
                     </nav>
                 </div>
             </header>
