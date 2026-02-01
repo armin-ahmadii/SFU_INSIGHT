@@ -531,24 +531,26 @@ function App() {
             return deptCode.startsWith(letters);
         }).slice(0, 5); // Limit to top 5 matching departments
 
-        const fetchGroupedCourses = async () => {
+        const fetchResults = async () => {
             setSearchLoading(true);
             try {
-                let validGroups = [];
-                let courseResults = [];
+                // 1. Fetch Backend Professors (RMP)
+                const profPromise = fetch(`http://127.0.0.1:3001/api/professors/search?name=${encodeURIComponent(query)}`)
+                    .then(res => res.ok ? res.json() : [])
+                    .catch(() => []);
 
+                // 2. Fetch/Match Courses
+                let courseResults = [];
+                let validGroups = [];
                 if (matchingDepts.length > 0) {
-                    // Fetch courses for all matching departments in parallel
-                    const promises = matchingDepts.map(async (major) => {
+                    const coursePromises = matchingDepts.map(async (major) => {
                         const deptCode = (major.text || major.value || major).toLowerCase();
                         const deptName = major.name || deptCode.toUpperCase();
 
-                        // Check cache first
                         if (courseCache[deptCode]) {
                             return { dept: deptCode, name: deptName, courses: courseCache[deptCode] };
                         }
 
-                        // Fetch if not cached
                         try {
                             const courses = await getCourses('2026', 'spring', deptCode);
                             if (Array.isArray(courses)) {
@@ -560,9 +562,7 @@ function App() {
                         return null;
                     });
 
-                    const results = await Promise.all(promises);
-
-                    // Filter valid results and update cache
+                    const results = await Promise.all(coursePromises);
                     const newCache = {};
                     validGroups = results.filter(r => r && Array.isArray(r.courses) && r.courses.length > 0);
 
@@ -576,7 +576,6 @@ function App() {
                         setCourseCache(prev => ({ ...prev, ...newCache }));
                     }
 
-                    // Filter courses by number OR title (description) if provided
                     const grouped = validGroups.map(group => {
                         let filtered = group.courses;
                         const deptStr = group.dept.toUpperCase();
@@ -613,26 +612,55 @@ function App() {
                         };
                     }).filter(group => group.courses.length > 0);
 
-                    // Update grouped results for dropdown
                     setGroupedResults(grouped);
                     courseResults = grouped.flatMap(g => g.courses);
                 } else {
                     setGroupedResults([]);
                 }
 
-                // Combine results: Professors + Courses (Courses prioritized)
-                setSearchResults([...courseResults, ...matchingProfs]);
+                // 3. Merge and deduplicate professors
+                const rawBackendProfs = await profPromise;
+                const backendProfs = rawBackendProfs.map(p => ({
+                    ...p,
+                    name: p.name || `${p.firstName} ${p.lastName}`.trim(),
+                    schoolName: p.school?.name || 'SFU'
+                }));
+
+                const localProfsMatched = professors.filter(p => p.name.toUpperCase().includes(query));
+
+                // Deduplicate by name
+                const seenNames = new Set();
+                const mergedProfs = [];
+
+                // Prioritize backend results (usually more complete RMP data)
+                [...backendProfs, ...localProfsMatched].forEach(p => {
+                    const name = p.name;
+                    if (name && !seenNames.has(name)) {
+                        seenNames.add(name);
+                        mergedProfs.push({
+                            type: 'prof',
+                            data: {
+                                id: p.id,
+                                name: p.name,
+                                dept: p.dept || p.schoolName || 'SFU',
+                                email: p.email || '',
+                                courseId: p.courseId || null
+                            }
+                        });
+                    }
+                });
+
+                setSearchResults([...courseResults, ...mergedProfs]);
 
             } catch (error) {
                 console.error('Search failed:', error);
-                setSearchResults(matchingProfs); // AT LEAST show profs if course fetch fails
                 setGroupedResults([]);
             } finally {
                 setSearchLoading(false);
             }
         };
 
-        const timer = setTimeout(fetchGroupedCourses, 300);
+        const timer = setTimeout(fetchResults, 300);
         return () => clearTimeout(timer);
     }, [search, majors, courseCache, professors]);
 
@@ -853,7 +881,7 @@ function App() {
                             <div className="max-w-2xl mx-auto mb-8" style={{ position: 'relative' }}>
                                 <input
                                     type="text"
-                                    placeholder="Search departments (e.g., CMPT, BUS, MATH)..."
+                                    placeholder="Search Departments or Instructor Names..."
                                     className="search-input"
                                     value={search}
                                     onChange={(e) => setSearch(e.target.value)}
