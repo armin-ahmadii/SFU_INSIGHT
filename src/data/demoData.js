@@ -52,7 +52,7 @@ export const CMPT_225_DATA = {
         syllabi: [
             {
                 term: 'Spring 2026',
-                prof: 'Dr. Brian Fraser',
+                prof: 'Amirhossein Mozafari Khameneh',
                 topics: 'ADTs, Linked Lists, Stacks, Queues, Trees, BSTs, Heaps, Hash Tables, Graphs, Sorting'
             },
             {
