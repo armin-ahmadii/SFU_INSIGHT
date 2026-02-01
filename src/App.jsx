@@ -139,7 +139,7 @@ function App() {
 
     const handleCreateReview = (e) => {
         e.preventDefault();
-        setTimeout(() => { // Mock network delay
+        setTimeout(() => {
             setHasContributed(true);
             setShowContributionForm(false);
         }, 800);
@@ -157,29 +157,29 @@ function App() {
 
             {/* 1. Header */}
             {/* 1. Header */}
-            <header className="sticky top-0 z-40 bg-gradient-to-r from-red-700 via-red-600 to-red-700 border-b border-red-800 shadow-lg">
+            <header style={{ position: 'sticky', top: 0, zIndex: 40, backgroundColor: '#5c0a1f', borderBottom: '2px solid #3d0614', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
                 <div className="w-full px-8 h-24 flex items-center justify-between">
-                    <div className="flex items-center gap-3 cursor-pointer" onClick={() => { setSearch(''); setSelectedItem(null); }}>
-                        <div className="bg-white/10 backdrop-blur-sm text-white p-2 rounded-lg border border-white/20">
-                            <BookOpen size={26} strokeWidth={2.5} />
+                    <div className="flex items-center gap-4 cursor-pointer" onClick={() => { setSearch(''); setSelectedItem(null); }}>
+                        <div style={{ backgroundColor: 'rgba(255,255,255,0.15)', padding: '0.75rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.25)' }}>
+                            <BookOpen size={36} strokeWidth={2.5} color="white" />
                         </div>
-                        <span className="font-bold text-3xl tracking-tight text-white drop-shadow-lg">SFU Insight</span>
+                        <span style={{ fontSize: '2.5rem', fontWeight: 'bold', color: 'white', textShadow: '0 2px 4px rgba(0,0,0,0.3)' }}>SFU Insight</span>
                     </div>
 
-                    <nav className="flex flex-row items-center gap-16">
-                        <a href="#" className="flex items-center gap-2.5 text-xl font-semibold text-white hover:text-white hover:scale-110 transition-all duration-200 hover:drop-shadow-lg">
-                            <Search size={24} />
-                            <span>Search</span>
+                    <nav style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <a href="#" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1.125rem', fontWeight: '600', color: 'white', padding: '0.75rem 1.25rem', borderRadius: '8px', transition: 'all 0.2s' }} onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.15)'} onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}>
+                            <BarChart2 size={22} />
+                            <span>Schedule</span>
                         </a>
-                        <a href="#" className="flex items-center gap-2.5 text-xl font-semibold text-white hover:text-white hover:scale-110 transition-all duration-200 hover:drop-shadow-lg">
-                            <Bookmark size={24} />
+                        <a href="#" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1.125rem', fontWeight: '600', color: 'white', padding: '0.75rem 1.25rem', borderRadius: '8px', transition: 'all 0.2s' }} onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.15)'} onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}>
+                            <Bookmark size={22} />
                             <span>Explore</span>
                         </a>
 
                         <SignedOut>
                             <SignInButton mode="modal">
-                                <button className="flex items-center gap-2.5 text-xl font-semibold text-white hover:text-white hover:scale-110 transition-all duration-200 hover:drop-shadow-lg">
-                                    <User size={24} />
+                                <button style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1.125rem', fontWeight: '600', color: 'white', padding: '0.75rem 1.25rem', borderRadius: '8px', transition: 'all 0.2s', cursor: 'pointer' }} onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.15)'} onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}>
+                                    <User size={22} />
                                     <span>Login</span>
                                 </button>
                             </SignInButton>
@@ -202,11 +202,11 @@ function App() {
             <section className="pt-20 pb-12 px-4 flex justify-center">
                 <div className="w-full max-w-4xl text-center">
                     <h1 className="text-4xl md:text-5xl text-gray-900 mb-4 tracking-tight">
-                        Find the <span className="text-red-600">truth</span> about SFU courses.
+                        Honest insights into SFU courses, powered by students like you.
                     </h1>
-                    <p className="text-lg text-gray-500 mb-10 max-w-2xl mx-auto">
-                        Workload, real difficulty, instructor vibes, topic maps, and best resources—powered by students like you.
-                    </p>
+                    {/* <p className="text-lg text-gray-500 mb-10 max-w-2xl mx-auto">
+                        , real difficulty, instructor vibeWorkloads, topic maps, and best resources—powered by students like you.
+                    </p> */}
 
                     <div className="relative max-w-2xl mx-auto mb-8">
                         <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400" size={24} />
