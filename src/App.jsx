@@ -5,7 +5,7 @@ import {
     CheckCircle, Zap, ShieldCheck
 } from 'lucide-react';
 
-import { SignedIn, SignedOut, SignInButton, UserButton } from '@clerk/clerk-react';
+import { SignedIn, SignedOut, SignInButton, UserButton, useUser, useClerk } from '@clerk/clerk-react';
 import { getDepartments, getCourses } from './api/sfuScheduleApi';
 import Scheduler from './components/Scheduler';
 
@@ -102,11 +102,13 @@ const PROFS = [
 // --- APP COMPONENT ---
 
 function App() {
+    const { user, isLoaded, isSignedIn } = useUser();
+    const { openSignIn } = useClerk();
+
     const [search, setSearch] = useState('');
     const [activeTab, setActiveTab] = useState('All'); // All, Courses, Professors
     const [selectedItem, setSelectedItem] = useState(null); // For modal
     const [savedCourses, setSavedCourses] = useState(new Set(['c1']));
-    const [hasContributed, setHasContributed] = useState(false);
     const [showContributionForm, setShowContributionForm] = useState(false);
     const [resourceVotes, setResourceVotes] = useState({});
     const [majors, setMajors] = useState([]);
@@ -118,6 +120,10 @@ function App() {
     const [currentView, setCurrentView] = useState('home'); // 'home' or 'scheduler'
     const [searchResults, setSearchResults] = useState([]);
     const [searchLoading, setSearchLoading] = useState(false);
+    const [submittingReview, setSubmittingReview] = useState(false);
+
+    // Derived state for contribution
+    const hasContributed = user?.publicMetadata?.hasContributed === true;
 
     // Fetch departments (majors) on component mount - using same API as Scheduler
     useEffect(() => {
@@ -129,7 +135,6 @@ function App() {
                     setMajors(data);
                 }
             } catch (error) {
-                console.error('Failed to fetch majors:', error);
                 // Fallback departments
                 setMajors([
                     { value: 'cmpt', text: 'CMPT', name: 'Computing Science' },
@@ -272,12 +277,43 @@ function App() {
         setSavedCourses(next);
     };
 
-    const handleCreateReview = (e) => {
+    const handleCreateReview = async (e) => {
         e.preventDefault();
-        setTimeout(() => {
-            setHasContributed(true);
-            setShowContributionForm(false);
-        }, 800);
+        setSubmittingReview(true);
+
+        try {
+            // Collect form data (simplified for now)
+            const formData = {
+                courseCode: e.target[1].value,
+                // ... other fields
+            };
+
+            const response = await fetch('http://localhost:3001/api/reviews', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId: user.id, reviewData: formData })
+            });
+
+            if (response.ok) {
+                await user.reload(); // Reload user to fetch updated metadata
+                setShowContributionForm(false);
+            } else {
+                alert('Failed to submit review. Please try again.');
+            }
+        } catch (error) {
+            console.error(error);
+            alert('An error occurred.');
+        } finally {
+            setSubmittingReview(false);
+        }
+    };
+
+    const handleUnlockClick = () => {
+        if (!isSignedIn) {
+            openSignIn();
+        } else {
+            setShowContributionForm(true);
+        }
     };
 
     const incrementVote = (rId) => {
@@ -706,10 +742,10 @@ function App() {
                                                         Contribute just <b>one review</b> to see full topic maps, exam tips, and resource libraries.
                                                     </p>
                                                     <button
-                                                        onClick={() => setShowContributionForm(true)}
+                                                        onClick={handleUnlockClick}
                                                         className="btn btn-primary w-full shadow-lg"
                                                     >
-                                                        Write a 60-second review
+                                                        {isSignedIn ? 'Write a 60-second review' : 'Sign in to Unlock'}
                                                     </button>
                                                 </div>
                                             </div>
@@ -773,8 +809,12 @@ function App() {
                                     >
                                         Cancel
                                     </button>
-                                    <button type="submit" className="btn btn-primary">
-                                        Submit Review
+                                    <button
+                                        type="submit"
+                                        className="btn btn-primary"
+                                        disabled={submittingReview}
+                                    >
+                                        {submittingReview ? 'Submitting...' : 'Submit Review'}
                                     </button>
                                 </div>
                             </form>
