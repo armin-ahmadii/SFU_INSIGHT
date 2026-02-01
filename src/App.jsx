@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 
 import { SignedIn, SignedOut, SignInButton, UserButton, useUser, useClerk } from '@clerk/clerk-react';
-import { getDepartments, getCourses } from './api/sfuScheduleApi';
+import { getDepartments, getCourses, startProfessorAggregation } from './api/sfuScheduleApi';
 import Scheduler from './components/Scheduler';
 
 
@@ -56,7 +56,7 @@ const COURSES = [
         id: 'c3',
         code: 'BUS 201',
         title: 'Introduction to Business',
-        term: 'Fall 2025',
+        term: 'Spring 2026',
         description: 'An overview of the business environment and the role of business in society.',
         metrics: { difficulty: 2.1, workload: 5, fairness: 4.8, clarity: 4.9, n: 89 },
         assessment: ['Group Project: 40%', 'Exam: 60%'],
@@ -112,6 +112,7 @@ function App() {
     const [showContributionForm, setShowContributionForm] = useState(false);
     const [resourceVotes, setResourceVotes] = useState({});
     const [majors, setMajors] = useState([]);
+    const [professors, setProfessors] = useState([]); // Store aggregated professors
     const [selectedMajor, setSelectedMajor] = useState('');
     const [showMajorDropdown, setShowMajorDropdown] = useState(false);
     const [loadingMajors, setLoadingMajors] = useState(false);
@@ -142,14 +143,44 @@ function App() {
         });
     }, [search, majors]);
 
+    const [browseMode, setBrowseMode] = useState(false);
+    const [browseLetter, setBrowseLetter] = useState('A'); // Default to A
+
+    // Derived browse results
+    const browseResults = useMemo(() => {
+        if (!browseMode) return [];
+        if (activeTab === 'Courses') { // Browsing Departments/Majors
+            return majors.filter(m => {
+                const name = m.text || m.value || '';
+                return name.toUpperCase().startsWith(browseLetter);
+            }).sort((a, b) => (a.text || '').localeCompare(b.text || ''));
+        } else if (activeTab === 'Professors') {
+            return professors.filter(p => p.name.toUpperCase().startsWith(browseLetter)).sort((a, b) => a.name.localeCompare(b.name));
+        }
+        return [];
+    }, [activeTab, browseLetter, majors, browseMode]);
     // Fetch departments (majors) on component mount - using same API as Scheduler
+    // Fetch departments and professors on component mount
     useEffect(() => {
-        async function fetchMajors() {
+        async function fetchData() {
             setLoadingMajors(true);
             try {
-                const data = await getDepartments('2025', 'spring');
-                if (Array.isArray(data)) {
-                    setMajors(data);
+                // Fetch Majors
+                const majorsData = await getDepartments('2026', 'spring');
+                if (Array.isArray(majorsData)) {
+                    setMajors(majorsData);
+                }
+
+                // Start Progressive Professor Scan
+                if (typeof startProfessorAggregation === 'function') {
+                    startProfessorAggregation('2026', 'spring', (newProfs) => {
+                        setProfessors(prev => {
+                            const combined = [...prev, ...newProfs];
+                            // Remove duplicates by ID just in case
+                            const unique = Array.from(new Map(combined.map(item => [item.id, item])).values());
+                            return unique.sort((a, b) => a.name.localeCompare(b.name));
+                        });
+                    });
                 }
             } catch (error) {
                 // Fallback departments
@@ -169,7 +200,7 @@ function App() {
                 setLoadingMajors(false);
             }
         }
-        fetchMajors();
+        fetchData();
     }, []);
 
     // Fetch courses when a major is selected
@@ -181,7 +212,7 @@ function App() {
         async function fetchCourses() {
             setLoadingCourses(true);
             try {
-                const data = await getCourses('2025', 'spring', selectedMajor);
+                const data = await getCourses('2026', 'spring', selectedMajor);
                 if (Array.isArray(data)) {
                     setMajorCourses(data);
                 }
@@ -196,6 +227,7 @@ function App() {
     }, [selectedMajor]);
 
     // Search Logic - fetch from API based on search input
+    // Search Logic - fetch from API based on search input
     useEffect(() => {
         // Clear results if search is empty
         if (!search.trim()) {
@@ -208,111 +240,120 @@ function App() {
 
         // Extract letters (department) and numbers (course number) from query
         const letters = query.match(/[A-Z]+/)?.[0] || '';
-        const numbers = query.match(/\d+/)?.[0] || '';
 
-        // Need at least 1 letter to search
-        if (letters.length < 1) {
-            setSearchResults([]);
-            setGroupedResults([]);
-            return;
-        }
+        // Check for matching professors locally
+        const matchingProfs = professors.filter(p => p.name.toUpperCase().includes(query)).map(p => ({
+            type: 'prof',
+            data: {
+                id: p.id,
+                name: p.name,
+                dept: p.dept,
+                email: p.email,
+                courseId: null // Link to course if possible
+            }
+        }));
 
-        // Find all matching departments
+        // Find match departments for course search
         const matchingDepts = majors.filter(m => {
             const deptCode = (m.text || m.value || m).toUpperCase();
             return deptCode.startsWith(letters);
         }).slice(0, 5); // Limit to top 5 matching departments
 
-        if (matchingDepts.length === 0) {
-            setSearchResults([]);
-            setGroupedResults([]);
-            return;
-        }
-
         const fetchGroupedCourses = async () => {
             setSearchLoading(true);
             try {
-                // Fetch courses for all matching departments in parallel
-                const promises = matchingDepts.map(async (major) => {
-                    const deptCode = (major.text || major.value || major).toLowerCase();
-                    const deptName = major.name || deptCode.toUpperCase();
+                let validGroups = [];
+                let courseResults = [];
 
-                    // Check cache first
-                    if (courseCache[deptCode]) {
-                        return { dept: deptCode, name: deptName, courses: courseCache[deptCode] };
-                    }
+                if (matchingDepts.length > 0) {
+                    // Fetch courses for all matching departments in parallel
+                    const promises = matchingDepts.map(async (major) => {
+                        const deptCode = (major.text || major.value || major).toLowerCase();
+                        const deptName = major.name || deptCode.toUpperCase();
 
-                    // Fetch if not cached
-                    try {
-                        const courses = await getCourses('2025', 'spring', deptCode);
-                        if (Array.isArray(courses)) {
-                            // Update cache locally for this execution context
-                            // We can't rely on setState being immediate for the next iteration
-                            return { dept: deptCode, name: deptName, courses };
+                        // Check cache first
+                        if (courseCache[deptCode]) {
+                            return { dept: deptCode, name: deptName, courses: courseCache[deptCode] };
                         }
-                    } catch (e) {
-                        console.error(`Failed to fetch ${deptCode}`, e);
+
+                        // Fetch if not cached
+                        try {
+                            const courses = await getCourses('2026', 'spring', deptCode);
+                            if (Array.isArray(courses)) {
+                                return { dept: deptCode, name: deptName, courses };
+                            }
+                        } catch (e) {
+                            console.error(`Failed to fetch ${deptCode}`, e);
+                        }
+                        return null;
+                    });
+
+                    const results = await Promise.all(promises);
+
+                    // Filter valid results and update cache
+                    const newCache = {};
+                    validGroups = results.filter(r => r && Array.isArray(r.courses) && r.courses.length > 0);
+
+                    validGroups.forEach(g => {
+                        if (!courseCache[g.dept]) {
+                            newCache[g.dept] = g.courses;
+                        }
+                    });
+
+                    if (Object.keys(newCache).length > 0) {
+                        setCourseCache(prev => ({ ...prev, ...newCache }));
                     }
-                    return null;
-                });
 
-                const results = await Promise.all(promises);
+                    // Filter courses by number OR title (description) if provided
+                    const grouped = validGroups.map(group => {
+                        let filtered = group.courses;
+                        const deptStr = group.dept.toUpperCase();
+                        const queryTerm = query.replace(deptStr, '').trim();
 
-                // Filter valid results and update cache
-                const newCache = {};
-                const validGroups = results.filter(r => r && Array.isArray(r.courses) && r.courses.length > 0);
+                        if (queryTerm) {
+                            filtered = group.courses.filter(c => {
+                                const numberMatch = (c.value && c.value.startsWith(queryTerm)) ||
+                                    (c.text && c.text.startsWith(queryTerm));
+                                const titleMatch = c.title && c.title.toUpperCase().includes(queryTerm);
+                                return numberMatch || titleMatch;
+                            });
+                        }
 
-                validGroups.forEach(g => {
-                    if (!courseCache[g.dept]) {
-                        newCache[g.dept] = g.courses;
-                    }
-                });
+                        return {
+                            dept: group.dept,
+                            name: group.name,
+                            courses: filtered.slice(0, 10).map(c => ({
+                                type: 'course',
+                                data: {
+                                    id: `${group.dept}-${c.value}`,
+                                    code: `${group.dept.toUpperCase()} ${c.value}`,
+                                    title: c.title || 'Course',
+                                    term: 'Spring 2026',
+                                    description: `${group.dept.toUpperCase()} ${c.value} - ${c.title || 'Course details'}`,
+                                    dept: group.dept,
+                                    courseNum: c.value,
+                                    metrics: { difficulty: 3.5, workload: 8, fairness: 4.0, clarity: 4.0, n: 0 },
+                                    assessment: [],
+                                    tips: [],
+                                    resources: []
+                                }
+                            }))
+                        };
+                    }).filter(group => group.courses.length > 0);
 
-                if (Object.keys(newCache).length > 0) {
-                    setCourseCache(prev => ({ ...prev, ...newCache }));
+                    // Update grouped results for dropdown
+                    setGroupedResults(grouped);
+                    courseResults = grouped.flatMap(g => g.courses);
+                } else {
+                    setGroupedResults([]);
                 }
 
-                // Filter courses by number if provided
-                const grouped = validGroups.map(group => {
-                    let filtered = group.courses;
-                    if (numbers) {
-                        filtered = group.courses.filter(c =>
-                            (c.value && c.value.startsWith(numbers)) ||
-                            (c.text && c.text.startsWith(numbers))
-                        );
-                    }
-
-                    return {
-                        dept: group.dept,
-                        name: group.name,
-                        courses: filtered.slice(0, 10).map(c => ({
-                            type: 'course',
-                            data: {
-                                id: `${group.dept}-${c.value}`,
-                                code: `${group.dept.toUpperCase()} ${c.value}`,
-                                title: c.title || 'Course',
-                                term: 'Spring 2025',
-                                description: `${group.dept.toUpperCase()} ${c.value} - ${c.title || 'Course details'}`,
-                                dept: group.dept,
-                                courseNum: c.value,
-                                metrics: { difficulty: 3.5, workload: 8, fairness: 4.0, clarity: 4.0, n: 0 },
-                                assessment: [],
-                                tips: [],
-                                resources: []
-                            }
-                        }))
-                    };
-                }).filter(group => group.courses.length > 0);
-
-                setGroupedResults(grouped);
-
-                // Also flatten for legacy compatibility
-                const flat = grouped.flatMap(g => g.courses);
-                setSearchResults(flat);
+                // Combine results: Professors + Courses
+                setSearchResults([...matchingProfs, ...courseResults]);
 
             } catch (error) {
                 console.error('Search failed:', error);
-                setSearchResults([]);
+                setSearchResults(matchingProfs); // At least show profs if course fetch fails
                 setGroupedResults([]);
             } finally {
                 setSearchLoading(false);
@@ -321,7 +362,7 @@ function App() {
 
         const timer = setTimeout(fetchGroupedCourses, 300);
         return () => clearTimeout(timer);
-    }, [search, majors, courseCache]);
+    }, [search, majors, courseCache, professors]);
 
     // Filter results by active tab
     const results = useMemo(() => {
@@ -392,6 +433,7 @@ function App() {
                 <div className="w-full px-8 h-24 flex items-center justify-between">
                     <div
                         className="flex items-center gap-4 cursor-pointer"
+                        style={{ cursor: 'pointer' }}
                         onClick={() => { setSearch(''); setSelectedItem(null); setCurrentView('home'); }}
                     >
                         <div style={{ padding: '0.75rem' }}>
@@ -727,35 +769,87 @@ function App() {
                         </section>
                     )}
 
-                    {/* 4. Default Homepage Content (if no search) */}
+                    {/* 4. Browse Interface (replaces default content) */}
                     {!search && (
-                        <section className="container max-w-4xl">
-                            <div className="grid md:grid-cols-2 gap-8">
-                                <div>
-                                    <h3 className="flex items-center gap-2 font-bold text-gray-800 mb-4">
-                                        <Zap size={18} className="text-amber-500" /> Popular this term
+                        <section className="container max-w-4xl animate-fade-in">
+                            {/* Alphabet Scroll for Browse */}
+                            <div className="flex flex-wrap justify-center gap-2 mb-10 px-4">
+                                {['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'].map(letter => (
+                                    <button
+                                        key={letter}
+                                        onClick={() => {
+                                            setBrowseMode(true);
+                                            setBrowseLetter(letter);
+                                            // Make sure we are in a valid browse tab
+                                            if (activeTab === 'All') setActiveTab('Courses');
+                                        }}
+                                        className={`w-8 h-8 flex items-center justify-center rounded-full text-sm font-bold transition-all ${browseLetter === letter
+                                            ? 'bg-[#a6192e] text-white shadow-md transform scale-110'
+                                            : 'bg-white text-gray-400 hover:bg-red-50 hover:text-[#a6192e]'
+                                            }`}
+                                    >
+                                        {letter}
+                                    </button>
+                                ))}
+                            </div>
+
+                            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden min-h-[400px]">
+                                <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+                                    <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                                        {activeTab === 'Professors' ? <User size={24} className="text-[#a6192e]" /> : <BookOpen size={24} className="text-[#a6192e]" />}
+                                        Browsing {activeTab === 'All' ? 'Courses' : activeTab} - <span className="text-[#a6192e]">{browseLetter}</span>
                                     </h3>
-                                    <div className="flex flex-wrap gap-2">
-                                        {COURSES.map(c => (
-                                            <div key={c.id} onClick={() => setSelectedItem(c)} className="bg-white border hover:border-red-300 cursor-pointer px-3 py-2 rounded-md shadow-sm text-sm font-medium text-gray-700">
-                                                {c.code}
-                                            </div>
-                                        ))}
-                                    </div>
+                                    <span className="text-sm text-gray-500 font-medium">
+                                        {browseResults.length} result{browseResults.length !== 1 ? 's' : ''}
+                                    </span>
                                 </div>
 
-                                <div>
-                                    <h3 className="flex items-center gap-2 font-bold text-gray-800 mb-4">
-                                        <ShieldCheck size={18} className="text-emerald-500" /> Top Contributors
-                                    </h3>
-                                    <div className="space-y-3">
-                                        {[1, 2, 3].map(i => (
-                                            <div key={i} className="flex items-center gap-3 text-sm text-gray-600">
-                                                <div className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center text-xs font-bold">U{i}</div>
-                                                <span>Contributed 3 resources to CMPT 225</span>
+                                <div className="divide-y divide-gray-50">
+                                    {browseResults.length > 0 ? (
+                                        browseResults.map((item, idx) => (
+                                            activeTab === 'Professors' ? (
+                                                <div key={idx} className="p-4 hover:bg-gray-50 flex items-center justify-between group cursor-pointer transition-colors">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="w-10 h-10 rounded-full bg-red-50 text-[#a6192e] flex items-center justify-center font-bold">
+                                                            {item.name.charAt(0)}
+                                                        </div>
+                                                        <div>
+                                                            <h4 className="font-bold text-gray-800 group-hover:text-[#a6192e] transition-colors">{item.name}</h4>
+                                                            <p className="text-sm text-gray-500">{item.dept} Department</p>
+                                                        </div>
+                                                    </div>
+                                                    <ChevronRight size={18} className="text-gray-300 group-hover:text-[#a6192e]" />
+                                                </div>
+                                            ) : (
+                                                <div
+                                                    key={idx}
+                                                    className="p-4 hover:bg-gray-50 flex items-center justify-between group cursor-pointer transition-colors"
+                                                    onClick={() => {
+                                                        // When browsing departments, select it to view courses
+                                                        setSelectedMajor(item.value || item);
+                                                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                                                    }}
+                                                >
+                                                    <div>
+                                                        <h4 className="font-bold text-gray-800 group-hover:text-[#a6192e] transition-colors text-lg">
+                                                            {item.text || item.value || item}
+                                                        </h4>
+                                                        {item.name && <p className="text-sm text-gray-500">{item.name}</p>}
+                                                    </div>
+                                                    <div className="flex items-center gap-2 text-sm text-gray-400 group-hover:text-[#a6192e]">
+                                                        View Courses <ChevronRight size={16} />
+                                                    </div>
+                                                </div>
+                                            )
+                                        ))
+                                    ) : (
+                                        <div className="p-12 text-center text-gray-400 flex flex-col items-center gap-3">
+                                            <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center">
+                                                <span className="text-xl font-bold text-gray-300">?</span>
                                             </div>
-                                        ))}
-                                    </div>
+                                            <p>No results found for "{browseLetter}"</p>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </section>

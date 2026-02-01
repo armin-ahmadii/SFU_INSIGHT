@@ -16,7 +16,7 @@ const DAY_MAP = { 'Mo': 'Monday', 'Tu': 'Tuesday', 'We': 'Wednesday', 'Th': 'Thu
 const HOURS = Array.from({ length: 14 }, (_, i) => i + 8);
 
 export default function Scheduler() {
-    const [year] = useState('2025');
+    const [year] = useState('2026');
     const [term] = useState('spring');
 
     // Selection state
@@ -147,7 +147,7 @@ export default function Scheduler() {
                     <Calendar size={24} color="#a6192e" />
                     Build Your Schedule
                 </h2>
-                <p style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: '1.5rem' }}>Spring 2025</p>
+                <p style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: '1.5rem' }}>Spring 2026</p>
 
                 <a
                     href="https://go.sfu.ca"
