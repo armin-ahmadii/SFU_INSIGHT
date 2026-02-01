@@ -18,7 +18,7 @@ SFUInsight is a website that provides detailed visualized analytics and crowd-so
 **Our motivation:**
 From previous experience, planning ahead for our future courses has always proven to be a challenge. We found it difficult to find reliable information about courses and their difficulty levels, and we wanted to create a platform that would make it easier for students to plan their courses and succeed in their studies. Aggregating real student notes, helpful study resources, and validated course syllabi provides a much more supportive platform for students to plan their courses and succeed in their studies.
 
-**How to use the website:**
+## How to use the website:
 
 **TECHSTACK:**
 - Frontend: React, TailwindCSS, Vite
