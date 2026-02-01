@@ -154,41 +154,34 @@ function App() {
 
             {/* 1. Header */}
             <header className="sticky top-0 z-40 bg-white/95 backdrop-blur border-b border-gray-200">
-                <div className="container h-16 flex items-center justify-between">
+                <div className="w-full px-6 h-16 flex items-center justify-between">
                     <div className="flex items-center gap-2 cursor-pointer" onClick={() => { setSearch(''); setSelectedItem(null); }}>
-                        <div className="bg-red-600 text-white p-1.5 rounded-md">
+                        <div className="bg-blue-600 text-white p-1.5 rounded-md">
                             <Zap size={20} fill="currentColor" />
                         </div>
-                        <span className="font-bold text-xl tracking-tight">SFU Course Insight</span>
+                        <span className="font-bold text-xl tracking-tight">SFU Insight</span>
                     </div>
 
-                    <div className="hidden md:flex items-center gap-6">
-                        {!hasContributed && (
-                            <span className="text-xs font-medium text-amber-600 bg-amber-50 px-3 py-1 rounded-full border border-amber-100 flex items-center gap-1">
-                                <Lock size={12} /> Contribute 1 review to unlock deeper insights
-                            </span>
-                        )}
-                        <button className="flex items-center gap-1.5 text-sm font-medium text-gray-600 hover:text-red-700 transition">
-                            <Bookmark size={18} />
-                            <span>My Courses ({savedCourses.size})</span>
+                    <nav className="flex flex-row items-center gap-3">
+                        <button className="flex items-center gap-2 px-6 py-3 text-base font-semibold text-gray-700 bg-white border border-gray-300 hover:border-gray-400 hover:bg-gray-50 rounded-md transition-all duration-200 hover:shadow-md">
+                            <Search size={20} />
+                            <span>Search</span>
                         </button>
-                        <button className="flex items-center gap-1.5 text-sm font-medium text-gray-600 hover:text-red-700 transition">
-                            <User size={18} />
+                        <button className="flex items-center gap-2.5 px-6 py-3 text-base font-semibold text-gray-700 bg-white border border-gray-300 hover:border-gray-400 hover:bg-gray-50 rounded-md transition-all duration-200 hover:shadow-md">
+                            <Bookmark size={20} />
+                            <span>Explore</span>
+                        </button>
+                        <button className="flex items-center gap-2.5 px-6 py-3 text-base font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-all duration-200 shadow-md hover:shadow-lg">
+                            <User size={20} />
                             <span>Login</span>
                         </button>
-                        <button
-                            onClick={() => setShowContributionForm(true)}
-                            className="btn btn-primary text-sm shadow-sm"
-                        >
-                            Contribute
-                        </button>
-                    </div>
+                    </nav>
                 </div>
             </header>
 
             {/* 2. Hero Search */}
-            <section className="pt-20 pb-12 px-4">
-                <div className="container max-w-4xl text-center">
+            <section className="pt-20 pb-12 px-4 flex justify-center">
+                <div className="w-full max-w-4xl text-center">
                     <h1 className="text-4xl md:text-5xl text-gray-900 mb-4 tracking-tight">
                         Find the <span className="text-red-600">truth</span> about SFU courses.
                     </h1>
