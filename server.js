@@ -3,6 +3,7 @@ import cors from 'cors';
 import rmp from '@mtucourses/rate-my-professors';
 import dotenv from 'dotenv';
 import { createClerkClient } from '@clerk/clerk-sdk-node';
+import { createClient } from '@supabase/supabase-js';
 
 // Access the RMP library functions from the default export
 const searchTeacher = rmp.default?.searchTeacher || rmp.searchTeacher;
@@ -16,8 +17,23 @@ const PORT = 3001;
 // Initialize Clerk Client
 const clerkClient = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
 
+// Initialize Supabase Client (server-side with service key)
+const supabase = process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY
+    ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY)
+    : null;
+
+// File upload config
+const ALLOWED_MIME_TYPES = [
+    'application/pdf',
+    'image/png',
+    'image/jpeg',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+];
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '15mb' })); // Increased for base64 uploads
 
 const SFU_SCHOOL_ID = 'U2Nob29sLTE0ODI=';
 
@@ -154,6 +170,240 @@ app.get('/api/instructor-courses', async (req, res) => {
     } catch (error) {
         console.error('Error fetching instructor courses:', error);
         res.status(500).json({ error: 'Failed to fetch instructor courses' });
+    }
+});
+
+// --- AUTH MIDDLEWARE ---
+const requireAuth = async (req, res, next) => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return res.status(401).json({ error: 'Unauthorized - No token provided' });
+        }
+
+        const token = authHeader.split(' ')[1];
+
+        // Verify the JWT token with Clerk
+        // The token from getToken() is a session JWT we can decode
+        const payload = await clerkClient.verifyToken(token);
+
+        if (!payload || !payload.sub) {
+            return res.status(401).json({ error: 'Unauthorized - Invalid token' });
+        }
+
+        req.userId = payload.sub; // Clerk user ID is in the 'sub' claim
+        next();
+    } catch (error) {
+        console.error('Auth error:', error.message);
+        return res.status(401).json({ error: 'Unauthorized - Token verification failed' });
+    }
+};
+
+// 5. Protected Success Guide Data (requires authentication)
+app.get('/api/success-guide/:courseCode', requireAuth, async (req, res) => {
+    try {
+        const { courseCode } = req.params;
+
+        // In a real app, fetch from database
+        // For now, return success to indicate auth passed
+        console.log(`[SUCCESS GUIDE] User ${req.userId} accessed guide for ${courseCode}`);
+
+        res.json({
+            success: true,
+            courseCode,
+            message: 'Authenticated access granted',
+            // The actual data is generated client-side from mockDataGenerator
+            // This endpoint validates that the user is authenticated
+        });
+    } catch (error) {
+        console.error('Error getting success guide:', error);
+        res.status(500).json({ error: 'Failed to get success guide data' });
+    }
+});
+
+// --- CONTRIBUTION ROUTES ---
+
+// 6. Create text contribution (tip or resource)
+app.post('/api/contributions', requireAuth, async (req, res) => {
+    try {
+        if (!supabase) {
+            return res.status(503).json({ error: 'Database not configured' });
+        }
+
+        const { courseCode, type, title, body, url, displayName } = req.body;
+
+        if (!courseCode || !type || !title) {
+            return res.status(400).json({ error: 'Missing required fields' });
+        }
+
+        if (!['tip', 'resource'].includes(type)) {
+            return res.status(400).json({ error: 'Invalid type for this endpoint' });
+        }
+
+        if (type === 'resource' && !url) {
+            return res.status(400).json({ error: 'URL required for resource' });
+        }
+
+        // Validate URL format
+        if (url && !/^https?:\/\/.+/.test(url)) {
+            return res.status(400).json({ error: 'Invalid URL format' });
+        }
+
+        const { data, error } = await supabase
+            .from('contributions')
+            .insert({
+                course_code: courseCode,
+                contribution_type: type,
+                title,
+                body: type === 'tip' ? body : null,
+                url: type === 'resource' ? url : null,
+                created_by: req.userId,
+                display_name: displayName || 'Anonymous'
+            })
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        console.log(`[CONTRIBUTION] User ${req.userId} submitted ${type} for ${courseCode}`);
+        res.json({ success: true, contribution: data });
+    } catch (error) {
+        console.error('Error creating contribution:', error);
+        res.status(500).json({ error: 'Failed to create contribution' });
+    }
+});
+
+// 7. Upload file contribution (notes)
+app.post('/api/contributions/upload', requireAuth, async (req, res) => {
+    try {
+        if (!supabase) {
+            return res.status(503).json({ error: 'Database not configured' });
+        }
+
+        const { courseCode, title, fileName, mimeType, fileSize, fileBase64, displayName } = req.body;
+
+        if (!courseCode || !title || !fileName || !fileBase64) {
+            return res.status(400).json({ error: 'Missing required fields' });
+        }
+
+        // Validate file type
+        if (!ALLOWED_MIME_TYPES.includes(mimeType)) {
+            return res.status(400).json({ error: `File type not allowed. Allowed: PDF, PNG, JPG, DOC, DOCX` });
+        }
+
+        // Validate file size
+        if (fileSize > MAX_FILE_SIZE) {
+            return res.status(400).json({ error: 'File too large (max 10 MB)' });
+        }
+
+        // Sanitize file name (prevent path traversal)
+        const sanitizedName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_').toLowerCase();
+        const timestamp = Date.now();
+        const filePath = `courses/${courseCode}/${req.userId}/${timestamp}-${sanitizedName}`;
+
+        // Decode base64 and upload
+        const fileBuffer = Buffer.from(fileBase64, 'base64');
+
+        const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('course-contributions')
+            .upload(filePath, fileBuffer, {
+                contentType: mimeType,
+                upsert: false
+            });
+
+        if (uploadError) throw uploadError;
+
+        // Create contribution record
+        const { data, error } = await supabase
+            .from('contributions')
+            .insert({
+                course_code: courseCode,
+                contribution_type: 'note',
+                title,
+                file_path: filePath,
+                file_name: sanitizedName,
+                mime_type: mimeType,
+                file_size: fileSize,
+                created_by: req.userId,
+                display_name: displayName || 'Anonymous'
+            })
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        console.log(`[UPLOAD] User ${req.userId} uploaded ${sanitizedName} for ${courseCode}`);
+        res.json({ success: true, contribution: data });
+    } catch (error) {
+        console.error('Error uploading contribution:', error);
+        res.status(500).json({ error: 'Failed to upload contribution' });
+    }
+});
+
+// 8. List approved contributions for a course
+app.get('/api/contributions/:courseCode', async (req, res) => {
+    try {
+        if (!supabase) {
+            // Return empty array if Supabase not configured (graceful degradation)
+            return res.json([]);
+        }
+
+        const { courseCode } = req.params;
+        const { type } = req.query;
+
+        let query = supabase
+            .from('contributions')
+            .select('*')
+            .eq('course_code', courseCode)
+            .eq('moderation_status', 'approved')
+            .order('created_at', { ascending: false });
+
+        if (type) {
+            query = query.eq('contribution_type', type);
+        }
+
+        const { data, error } = await query;
+
+        if (error) throw error;
+
+        res.json(data || []);
+    } catch (error) {
+        console.error('Error listing contributions:', error);
+        res.status(500).json({ error: 'Failed to list contributions' });
+    }
+});
+
+// 9. Get signed URL for file download
+app.get('/api/contributions/download/:id', requireAuth, async (req, res) => {
+    try {
+        if (!supabase) {
+            return res.status(503).json({ error: 'Database not configured' });
+        }
+
+        const { id } = req.params;
+
+        // Get contribution
+        const { data: contribution, error: fetchError } = await supabase
+            .from('contributions')
+            .select('file_path')
+            .eq('id', id)
+            .single();
+
+        if (fetchError || !contribution?.file_path) {
+            return res.status(404).json({ error: 'File not found' });
+        }
+
+        // Generate signed URL (expires in 1 hour)
+        const { data, error } = await supabase.storage
+            .from('course-contributions')
+            .createSignedUrl(contribution.file_path, 3600);
+
+        if (error) throw error;
+
+        res.json({ url: data.signedUrl });
+    } catch (error) {
+        console.error('Error generating download URL:', error);
+        res.status(500).json({ error: 'Failed to generate download URL' });
     }
 });
 

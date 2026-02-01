@@ -1463,16 +1463,27 @@ function App() {
                                                 </div>
                                             )}
 
-                                            {/* Success Guide CTA */}
+                                            {/* Success Guide CTA - Auth Gated */}
                                             <div style={{ background: 'linear-gradient(to right, #fef2f2, white)', padding: '24px', borderRadius: '12px', border: '1px solid #fecaca' }}>
                                                 <h4 style={{ fontWeight: 'bold', color: '#111827', marginBottom: '8px', fontSize: '18px' }}>PATH TO SUCCESS</h4>
                                                 <p style={{ fontSize: '14px', color: '#4b5563', marginBottom: '20px' }}>
                                                     Access community notes, video tutorials, and past syllabi for <b>{selectedItem.code}</b>.
                                                 </p>
+
+                                                {/* Auth-gated button */}
                                                 <button
                                                     onClick={() => {
-                                                        setSelectedItem(selectedItem);
-                                                        setCurrentView('success-guide');
+                                                        if (!isSignedIn) {
+                                                            // Trigger Clerk sign-in modal
+                                                            openSignIn({
+                                                                afterSignInUrl: window.location.href,
+                                                                afterSignUpUrl: window.location.href
+                                                            });
+                                                        } else {
+                                                            // Navigate to success guide
+                                                            setSelectedItem(selectedItem);
+                                                            setCurrentView('success-guide');
+                                                        }
                                                     }}
                                                     style={{
                                                         width: '100%',
@@ -1504,9 +1515,27 @@ function App() {
                                                         e.currentTarget.style.boxShadow = '0 10px 15px -3px rgba(0, 0, 0, 0.1)';
                                                     }}
                                                 >
+                                                    {!isSignedIn && <Lock size={20} />}
                                                     <span>PATH TO SUCCESS IN {selectedItem.code}</span>
-                                                    <ArrowRight size={22} />
+                                                    {isSignedIn ? <ArrowRight size={22} /> : null}
                                                 </button>
+
+                                                {/* Helper text when logged out */}
+                                                {!isSignedIn && (
+                                                    <p style={{
+                                                        fontSize: '12px',
+                                                        color: '#9ca3af',
+                                                        textAlign: 'center',
+                                                        marginTop: '12px',
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        justifyContent: 'center',
+                                                        gap: '6px'
+                                                    }}>
+                                                        <Lock size={12} />
+                                                        Log in to access exclusive student resources
+                                                    </p>
+                                                )}
                                             </div>
                                         </div>
 

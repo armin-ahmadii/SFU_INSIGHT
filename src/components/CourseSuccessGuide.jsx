@@ -3,11 +3,13 @@ import {
     ArrowLeft, ChevronDown, ChevronUp, Star, Download,
     MessageSquare, BookOpen, FileText, Play, Link2,
     ExternalLink, Upload, Clock, CheckCircle,
-    AlertTriangle, XCircle
+    AlertTriangle, XCircle, Lock
 } from 'lucide-react';
+import { useUser, useClerk } from '@clerk/clerk-react';
 import { generateCourseData } from '../utils/mockDataGenerator';
 import { CMPT_225_DATA, isCMPT225 } from '../data/demoData';
 import StudyGuidePreview from './StudyGuidePreview';
+import { UploadNotesModal, ShareTipsModal, RecommendResourceModal, Toast } from './ContributionModals';
 
 // --- SUB-COMPONENTS --- //
 
@@ -202,9 +204,40 @@ function QuoteCard({ quote, author }) {
 // --- MAIN PAGE --- //
 
 export default function CourseSuccessGuide({ course, onBack }) {
+    const { isSignedIn } = useUser();
+    const { openSignIn } = useClerk();
+
     const [data, setData] = useState(null);
     const [isDemoMode, setIsDemoMode] = useState(false);
     const [selectedNote, setSelectedNote] = useState(null);
+
+    // Contribution modal state
+    const [showUploadModal, setShowUploadModal] = useState(false);
+    const [showTipsModal, setShowTipsModal] = useState(false);
+    const [showResourceModal, setShowResourceModal] = useState(false);
+    const [toast, setToast] = useState({ message: '', type: 'success' });
+
+    // Handle contribute button clicks - requires auth
+    const handleContributeClick = (type) => {
+        if (!isSignedIn) {
+            openSignIn({
+                afterSignInUrl: window.location.href,
+                afterSignUpUrl: window.location.href
+            });
+            return;
+        }
+
+        if (type === 'notes') setShowUploadModal(true);
+        else if (type === 'tips') setShowTipsModal(true);
+        else if (type === 'resources') setShowResourceModal(true);
+    };
+
+    // Success callback - show toast
+    const handleContributionSuccess = () => {
+        setToast({ message: 'Contribution submitted successfully!', type: 'success' });
+        setTimeout(() => setToast({ message: '', type: 'success' }), 4000);
+        // In a full implementation, we'd also refresh the contributions list here
+    };
 
     useEffect(() => {
         if (course) {
@@ -221,6 +254,7 @@ export default function CourseSuccessGuide({ course, onBack }) {
             }
         }
     }, [course]);
+
 
     if (!data) {
         return (
@@ -593,45 +627,59 @@ export default function CourseSuccessGuide({ course, onBack }) {
                         Contribute by uploading notes, sharing tips, or recommending resources.
                     </p>
                     <div style={{ display: 'flex', justifyContent: 'center', gap: '12px', flexWrap: 'wrap' }}>
-                        <button style={{
-                            display: 'flex', alignItems: 'center', gap: '8px',
-                            padding: '12px 24px',
-                            backgroundColor: 'white',
-                            border: 'none',
-                            borderRadius: '12px',
-                            fontWeight: '700',
-                            color: '#a6192e',
-                            cursor: 'pointer',
-                            boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
-                        }}>
+                        <button
+                            onClick={() => handleContributeClick('notes')}
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: '8px',
+                                padding: '12px 24px',
+                                backgroundColor: 'white',
+                                border: 'none',
+                                borderRadius: '12px',
+                                fontWeight: '700',
+                                color: '#a6192e',
+                                cursor: 'pointer',
+                                boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+                            }}
+                        >
                             <Upload size={18} /> Upload Notes
                         </button>
-                        <button style={{
-                            display: 'flex', alignItems: 'center', gap: '8px',
-                            padding: '12px 24px',
-                            backgroundColor: 'rgba(255,255,255,0.15)',
-                            border: '2px solid rgba(255,255,255,0.3)',
-                            borderRadius: '12px',
-                            fontWeight: '700',
-                            color: 'white',
-                            cursor: 'pointer'
-                        }}>
+                        <button
+                            onClick={() => handleContributeClick('tips')}
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: '8px',
+                                padding: '12px 24px',
+                                backgroundColor: 'rgba(255,255,255,0.15)',
+                                border: '2px solid rgba(255,255,255,0.3)',
+                                borderRadius: '12px',
+                                fontWeight: '700',
+                                color: 'white',
+                                cursor: 'pointer'
+                            }}
+                        >
                             <MessageSquare size={18} /> Share Tips
                         </button>
-                        <button style={{
-                            display: 'flex', alignItems: 'center', gap: '8px',
-                            padding: '12px 24px',
-                            backgroundColor: 'rgba(255,255,255,0.15)',
-                            border: '2px solid rgba(255,255,255,0.3)',
-                            borderRadius: '12px',
-                            fontWeight: '700',
-                            color: 'white',
-                            cursor: 'pointer'
-                        }}>
+                        <button
+                            onClick={() => handleContributeClick('resources')}
+                            style={{
+                                display: 'flex', alignItems: 'center', gap: '8px',
+                                padding: '12px 24px',
+                                backgroundColor: 'rgba(255,255,255,0.15)',
+                                border: '2px solid rgba(255,255,255,0.3)',
+                                borderRadius: '12px',
+                                fontWeight: '700',
+                                color: 'white',
+                                cursor: 'pointer'
+                            }}
+                        >
                             <Link2 size={18} /> Recommend Resource
                         </button>
                     </div>
-                    <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)', marginTop: '24px', fontStyle: 'italic' }}>
+                    {!isSignedIn && (
+                        <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.7)', marginTop: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                            <Lock size={12} /> Sign in to contribute
+                        </p>
+                    )}
+                    <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.5)', marginTop: isSignedIn ? '24px' : '8px', fontStyle: 'italic' }}>
                         Powered by SFU students, for SFU students.
                     </p>
                 </section>
@@ -645,6 +693,33 @@ export default function CourseSuccessGuide({ course, onBack }) {
                     onClose={() => setSelectedNote(null)}
                 />
             )}
+
+            {/* Contribution Modals */}
+            <UploadNotesModal
+                isOpen={showUploadModal}
+                onClose={() => setShowUploadModal(false)}
+                courseCode={course?.code}
+                onSuccess={handleContributionSuccess}
+            />
+            <ShareTipsModal
+                isOpen={showTipsModal}
+                onClose={() => setShowTipsModal(false)}
+                courseCode={course?.code}
+                onSuccess={handleContributionSuccess}
+            />
+            <RecommendResourceModal
+                isOpen={showResourceModal}
+                onClose={() => setShowResourceModal(false)}
+                courseCode={course?.code}
+                onSuccess={handleContributionSuccess}
+            />
+
+            {/* Toast */}
+            <Toast
+                message={toast.message}
+                type={toast.type}
+                onClose={() => setToast({ message: '', type: 'success' })}
+            />
         </div>
     );
 }
