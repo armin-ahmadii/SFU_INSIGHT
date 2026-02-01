@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 
 import { SignedIn, SignedOut, SignInButton, UserButton } from '@clerk/clerk-react';
-import { getDepartments } from './api/sfuCoursesApi';
+import { getDepartments, getCourses } from './api/sfuScheduleApi';
 import Scheduler from './components/Scheduler';
 
 
@@ -113,28 +113,63 @@ function App() {
     const [selectedMajor, setSelectedMajor] = useState('');
     const [showMajorDropdown, setShowMajorDropdown] = useState(false);
     const [loadingMajors, setLoadingMajors] = useState(false);
+    const [majorCourses, setMajorCourses] = useState([]);
+    const [loadingCourses, setLoadingCourses] = useState(false);
     const [currentView, setCurrentView] = useState('home'); // 'home' or 'scheduler'
 
-    // Fetch majors on component mount
+    // Fetch departments (majors) on component mount - using same API as Scheduler
     useEffect(() => {
         async function fetchMajors() {
             setLoadingMajors(true);
             try {
-                const data = await getDepartments();
-                // If data is an array of strings, use directly; otherwise extract department names
+                const data = await getDepartments('2025', 'spring');
                 if (Array.isArray(data)) {
                     setMajors(data);
                 }
             } catch (error) {
                 console.error('Failed to fetch majors:', error);
-                // Fallback to common SFU departments if API fails
-                setMajors(['CMPT', 'MACM', 'MATH', 'PHYS', 'CHEM', 'BISC', 'STAT', 'ECON', 'BUS', 'PSYC', 'ENSC', 'IAT', 'HSCI', 'ENGL', 'HIST', 'POL', 'CRIM', 'SA', 'GEOG', 'KIN']);
+                // Fallback departments
+                setMajors([
+                    { value: 'cmpt', text: 'CMPT', name: 'Computing Science' },
+                    { value: 'macm', text: 'MACM', name: 'Mathematics and Computing' },
+                    { value: 'math', text: 'MATH', name: 'Mathematics' },
+                    { value: 'phys', text: 'PHYS', name: 'Physics' },
+                    { value: 'chem', text: 'CHEM', name: 'Chemistry' },
+                    { value: 'bisc', text: 'BISC', name: 'Biological Sciences' },
+                    { value: 'stat', text: 'STAT', name: 'Statistics' },
+                    { value: 'econ', text: 'ECON', name: 'Economics' },
+                    { value: 'bus', text: 'BUS', name: 'Business' },
+                    { value: 'psyc', text: 'PSYC', name: 'Psychology' }
+                ]);
             } finally {
                 setLoadingMajors(false);
             }
         }
         fetchMajors();
     }, []);
+
+    // Fetch courses when a major is selected
+    useEffect(() => {
+        if (!selectedMajor) {
+            setMajorCourses([]);
+            return;
+        }
+        async function fetchCourses() {
+            setLoadingCourses(true);
+            try {
+                const data = await getCourses('2025', 'spring', selectedMajor);
+                if (Array.isArray(data)) {
+                    setMajorCourses(data);
+                }
+            } catch (error) {
+                console.error('Failed to fetch courses:', error);
+                setMajorCourses([]);
+            } finally {
+                setLoadingCourses(false);
+            }
+        }
+        fetchCourses();
+    }, [selectedMajor]);
 
     // Search Logic
     const results = useMemo(() => {
@@ -284,7 +319,7 @@ function App() {
                                     }}
                                 >
                                     <BookOpen size={20} />
-                                    {selectedMajor || 'Select Your Major'}
+                                    {selectedMajor ? selectedMajor.toUpperCase() : 'Select Your Major'}
                                     <span style={{ marginLeft: '0.25rem', fontSize: '0.75rem' }}>{showMajorDropdown ? '▲' : '▼'}</span>
                                 </button>
 
@@ -301,17 +336,17 @@ function App() {
                                         boxShadow: '0 10px 40px rgba(0,0,0,0.15)',
                                         maxHeight: '300px',
                                         overflowY: 'auto',
-                                        width: '280px',
+                                        width: '320px',
                                         zIndex: 100
                                     }}>
                                         {loadingMajors ? (
-                                            <div style={{ padding: '1rem', textAlign: 'center', color: '#6b7280' }}>Loading majors...</div>
+                                            <div style={{ padding: '1rem', textAlign: 'center', color: '#6b7280' }}>Loading departments...</div>
                                         ) : (
                                             majors.map((major, idx) => (
                                                 <div
-                                                    key={idx}
+                                                    key={major.value || idx}
                                                     onClick={() => {
-                                                        setSelectedMajor(typeof major === 'string' ? major : major.name || major.value);
+                                                        setSelectedMajor(major.value || major);
                                                         setShowMajorDropdown(false);
                                                     }}
                                                     style={{
@@ -325,13 +360,81 @@ function App() {
                                                     onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
                                                     onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                                                 >
-                                                    {typeof major === 'string' ? major : major.name || major.value}
+                                                    <span style={{ fontWeight: '600' }}>{major.text || major}</span>
+                                                    {major.name && <span style={{ color: '#6b7280', marginLeft: '0.5rem' }}>- {major.name}</span>}
                                                 </div>
                                             ))
                                         )}
                                     </div>
                                 )}
                             </div>
+
+                            {/* Course List When Major Selected */}
+                            {selectedMajor && (
+                                <div style={{ marginTop: '2rem', textAlign: 'left', maxWidth: '600px', margin: '2rem auto 0' }}>
+                                    <h3 style={{ fontSize: '1.125rem', fontWeight: '700', color: '#1f2937', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                        <BookOpen size={20} color="#a6192e" />
+                                        {selectedMajor.toUpperCase()} Courses
+                                        <span style={{ fontSize: '0.875rem', fontWeight: '400', color: '#6b7280' }}>
+                                            ({majorCourses.length} courses)
+                                        </span>
+                                    </h3>
+
+                                    {loadingCourses ? (
+                                        <div style={{ padding: '2rem', textAlign: 'center', color: '#6b7280' }}>
+                                            Loading courses...
+                                        </div>
+                                    ) : majorCourses.length > 0 ? (
+                                        <div style={{
+                                            display: 'grid',
+                                            gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+                                            gap: '0.75rem',
+                                            maxHeight: '400px',
+                                            overflowY: 'auto',
+                                            padding: '0.5rem'
+                                        }}>
+                                            {majorCourses.map((course, idx) => (
+                                                <div
+                                                    key={course.value || idx}
+                                                    onClick={() => setSearch(`${selectedMajor.toUpperCase()} ${course.value || course.text}`)}
+                                                    style={{
+                                                        padding: '0.875rem',
+                                                        backgroundColor: 'white',
+                                                        border: '1px solid #e5e7eb',
+                                                        borderRadius: '10px',
+                                                        cursor: 'pointer',
+                                                        transition: 'all 0.2s',
+                                                        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                                                    }}
+                                                    onMouseOver={(e) => {
+                                                        e.currentTarget.style.borderColor = '#a6192e';
+                                                        e.currentTarget.style.transform = 'translateY(-2px)';
+                                                        e.currentTarget.style.boxShadow = '0 4px 12px rgba(166,25,46,0.15)';
+                                                    }}
+                                                    onMouseOut={(e) => {
+                                                        e.currentTarget.style.borderColor = '#e5e7eb';
+                                                        e.currentTarget.style.transform = 'translateY(0)';
+                                                        e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.05)';
+                                                    }}
+                                                >
+                                                    <div style={{ fontWeight: '600', color: '#a6192e', fontSize: '0.9375rem' }}>
+                                                        {selectedMajor.toUpperCase()} {course.value || course.text}
+                                                    </div>
+                                                    {course.title && (
+                                                        <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem', lineHeight: '1.3' }}>
+                                                            {course.title}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <div style={{ padding: '2rem', textAlign: 'center', color: '#9ca3af' }}>
+                                            No courses found for this department.
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     </section>
 
