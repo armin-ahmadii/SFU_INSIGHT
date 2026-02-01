@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Calendar, Trash2, Plus, AlertTriangle, Download, Link, Image, Search, Filter, XCircle, X, ExternalLink } from 'lucide-react';
+import { Calendar, Trash2, Plus, AlertTriangle, Download, Link, Image, Search, Filter, XCircle, X, ExternalLink, Save, Loader2, CheckCircle } from 'lucide-react';
+import { useUser, useAuth, useClerk } from '@clerk/clerk-react';
 import {
     getDepartments,
     getCourses,
@@ -9,6 +10,7 @@ import {
     timeToMinutes,
     checkTimeConflict
 } from '../api/sfuScheduleApi';
+import { getSchedule, saveSchedule } from '../api/schedules';
 import './Scheduler.css';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
@@ -16,10 +18,16 @@ const DAY_MAP = { 'Mo': 'Monday', 'Tu': 'Tuesday', 'We': 'Wednesday', 'Th': 'Thu
 const HOURS = Array.from({ length: 14 }, (_, i) => i + 8);
 
 export default function Scheduler() {
+    // Clerk auth
+    const { isSignedIn, isLoaded } = useUser();
+    const { getToken } = useAuth();
+    const { openSignIn } = useClerk();
+
     const deptRef = useRef(null);
     const courseRef = useRef(null);
     const [year] = useState('2026');
     const [term] = useState('spring');
+    const termKey = `${term}_${year}`; // e.g., "spring_2026"
 
     // Selection state
     const [departments, setDepartments] = useState([]);
@@ -42,6 +50,11 @@ export default function Scheduler() {
 
     // Total credits tracker
     const [totalCredits, setTotalCredits] = useState(0);
+
+    // Save/Load state
+    const [scheduleLoading, setScheduleLoading] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const [saveStatus, setSaveStatus] = useState(null); // null, 'success', 'error'
 
     // Global search state
     const [globalSearch, setGlobalSearch] = useState('');
@@ -73,33 +86,42 @@ export default function Scheduler() {
         loadDepts();
     }, [year, term]);
 
-    // Phase 1: Persistence - Load from localStorage
+    // Load saved schedule from database when user signs in
     useEffect(() => {
-        const savedSchedule = localStorage.getItem('sfu-schedule-2026');
-        if (savedSchedule) {
+        async function loadSavedSchedule() {
+            if (!isLoaded) return;
+
+            if (!isSignedIn) {
+                // Clear schedule when logged out
+                setSchedule([]);
+                return;
+            }
+
+            setScheduleLoading(true);
             try {
-                setSchedule(JSON.parse(savedSchedule));
-            } catch (e) {
-                console.error("Failed to parse saved schedule", e);
+                const token = await getToken();
+                if (!token) return;
+
+                const savedData = await getSchedule(termKey, token);
+                if (savedData && savedData.schedule_data) {
+                    setSchedule(savedData.schedule_data);
+                }
+            } catch (error) {
+                console.log('Could not load saved schedule:', error);
+            } finally {
+                setScheduleLoading(false);
             }
         }
-    }, []);
 
-    // Phase 1: Persistence - Auto-save
+        loadSavedSchedule();
+    }, [isSignedIn, isLoaded, termKey, getToken]);
+
+    // Calculate total credits when schedule changes
     useEffect(() => {
-        if (schedule.length >= 0) { // Save even if empty to allow clearing
-            localStorage.setItem('sfu-schedule-2026', JSON.stringify(schedule));
-        }
-
-        // Phase 5: Calculate total credits
-        // Note: SFU API doesn't always return units directly in the section details
-        // We'll estimate based on typical values or parse if available
-        // For now, we'll assume 3 units per course unless specified
         const total = schedule.reduce((acc, course) => {
             return acc + (course.units || 3);
         }, 0);
         setTotalCredits(total);
-
     }, [schedule]);
 
     // Phase 6: Keyboard Shortcuts
@@ -374,6 +396,41 @@ export default function Scheduler() {
                 : [...current, value];
             return { ...prev, [category]: updated };
         });
+    }
+
+    // Save schedule to database
+    async function handleSaveSchedule() {
+        // Require sign-in
+        if (!isSignedIn) {
+            openSignIn({
+                afterSignInUrl: window.location.href,
+                afterSignUpUrl: window.location.href
+            });
+            return;
+        }
+
+        setSaving(true);
+        setSaveStatus(null);
+
+        try {
+            const token = await getToken();
+            if (!token) throw new Error('Not authenticated');
+
+            await saveSchedule({
+                term: termKey,
+                scheduleData: schedule,
+                totalCredits
+            }, token);
+
+            setSaveStatus('success');
+            setTimeout(() => setSaveStatus(null), 2500);
+        } catch (error) {
+            console.error('Failed to save schedule:', error);
+            setSaveStatus('error');
+            setTimeout(() => setSaveStatus(null), 3000);
+        } finally {
+            setSaving(false);
+        }
     }
 
     // Phase 1: Clear Schedule
@@ -814,8 +871,61 @@ export default function Scheduler() {
                         </div>
                     </div>
 
-                    {schedule.length === 0 ? (
-                        <p style={{ fontSize: '0.875rem', color: '#9ca3af' }}>No courses added yet</p>
+                    {/* Save Schedule Button */}
+                    <button
+                        onClick={handleSaveSchedule}
+                        disabled={schedule.length === 0 || saving}
+                        style={{
+                            width: '100%',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '0.5rem',
+                            padding: '0.75rem 1rem',
+                            marginBottom: '1rem',
+                            background: saveStatus === 'success' ? '#10b981' : saveStatus === 'error' ? '#ef4444' : schedule.length === 0 ? '#e5e7eb' : '#a6192e',
+                            color: schedule.length === 0 ? '#9ca3af' : 'white',
+                            border: 'none',
+                            borderRadius: '8px',
+                            fontSize: '0.875rem',
+                            fontWeight: '600',
+                            cursor: schedule.length === 0 || saving ? 'not-allowed' : 'pointer',
+                            transition: 'all 0.2s'
+                        }}
+                    >
+                        {saving ? (
+                            <>
+                                <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
+                                Saving...
+                            </>
+                        ) : saveStatus === 'success' ? (
+                            <>
+                                <CheckCircle size={16} />
+                                Saved!
+                            </>
+                        ) : saveStatus === 'error' ? (
+                            <>
+                                <AlertTriangle size={16} />
+                                Failed to save
+                            </>
+                        ) : (
+                            <>
+                                <Save size={16} />
+                                {isSignedIn ? 'Save Schedule' : 'Sign in to Save'}
+                            </>
+                        )}
+                    </button>
+                    <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+
+                    {scheduleLoading ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '1rem', color: '#6b7280', fontSize: '0.875rem' }}>
+                            <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
+                            Loading your schedule...
+                        </div>
+                    ) : schedule.length === 0 ? (
+                        <p style={{ fontSize: '0.875rem', color: '#9ca3af' }}>
+                            {isSignedIn ? 'No courses added yet' : 'Sign in to save and load your schedule'}
+                        </p>
                     ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                             {schedule.map((s, idx) => (

@@ -594,6 +594,101 @@ app.delete('/api/saved-courses/:courseId', requireAuth, async (req, res) => {
     }
 });
 
+// --- SCHEDULE PERSISTENCE ROUTES ---
+
+// 15. Get user's saved schedule for a term
+app.get('/api/schedules', requireAuth, async (req, res) => {
+    try {
+        if (!supabase) {
+            return res.json(null);
+        }
+
+        const { term } = req.query;
+        if (!term) {
+            return res.status(400).json({ error: 'Term is required' });
+        }
+
+        const { data, error } = await supabase
+            .from('saved_schedules')
+            .select('*')
+            .eq('user_id', req.userId)
+            .eq('term', term)
+            .single();
+
+        if (error && error.code !== 'PGRST116') throw error; // PGRST116 = no rows found
+
+        res.json(data || null);
+    } catch (error) {
+        console.error('Error fetching schedule:', error);
+        res.status(500).json({ error: 'Failed to fetch schedule' });
+    }
+});
+
+// 16. Save/update user's schedule for a term (upsert)
+app.post('/api/schedules', requireAuth, async (req, res) => {
+    try {
+        if (!supabase) {
+            return res.status(503).json({ error: 'Database not configured' });
+        }
+
+        const { term, scheduleData, totalCredits } = req.body;
+
+        if (!term) {
+            return res.status(400).json({ error: 'Term is required' });
+        }
+
+        if (!Array.isArray(scheduleData)) {
+            return res.status(400).json({ error: 'scheduleData must be an array' });
+        }
+
+        // Upsert: insert or update if exists
+        const { data, error } = await supabase
+            .from('saved_schedules')
+            .upsert({
+                user_id: req.userId,
+                term,
+                schedule_data: scheduleData,
+                total_credits: totalCredits || 0,
+                updated_at: new Date().toISOString()
+            }, { onConflict: 'user_id,term' })
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        console.log(`[SCHEDULE] User ${req.userId} saved schedule for ${term} (${scheduleData.length} courses)`);
+        res.json({ success: true, schedule: data });
+    } catch (error) {
+        console.error('Error saving schedule:', error);
+        res.status(500).json({ error: 'Failed to save schedule' });
+    }
+});
+
+// 17. Delete user's schedule for a term
+app.delete('/api/schedules/:term', requireAuth, async (req, res) => {
+    try {
+        if (!supabase) {
+            return res.status(503).json({ error: 'Database not configured' });
+        }
+
+        const { term } = req.params;
+
+        const { error } = await supabase
+            .from('saved_schedules')
+            .delete()
+            .eq('user_id', req.userId)
+            .eq('term', term);
+
+        if (error) throw error;
+
+        console.log(`[SCHEDULE] User ${req.userId} deleted schedule for ${term}`);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error deleting schedule:', error);
+        res.status(500).json({ error: 'Failed to delete schedule' });
+    }
+});
+
 app.listen(PORT, () => {
     console.log(`Proxy server running on http://localhost:${PORT}`);
 });
