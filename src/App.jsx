@@ -2,12 +2,13 @@ import React, { useState, useMemo, useEffect } from 'react';
 import {
     Search, BookOpen, Star, User, Lock, ExternalLink,
     ThumbsUp, X, Bookmark, BarChart2, MessageSquare,
-    CheckCircle, Zap, ShieldCheck
+    CheckCircle, Zap, ShieldCheck, ArrowRight
 } from 'lucide-react';
 
 import { SignedIn, SignedOut, SignInButton, UserButton, useUser, useClerk } from '@clerk/clerk-react';
 import { getDepartments, getCourses, startProfessorAggregation } from './api/sfuScheduleApi';
 import Scheduler from './components/Scheduler';
+import CourseSuccessGuide from './components/CourseSuccessGuide';
 
 
 // --- MOCK DATA ---
@@ -480,6 +481,14 @@ function App() {
             {/* Scheduler View */}
             {currentView === 'scheduler' && <Scheduler />}
 
+            {/* Success Guide View */}
+            {currentView === 'success-guide' && (
+                <CourseSuccessGuide
+                    course={selectedItem}
+                    onBack={() => setCurrentView('home')}
+                />
+            )}
+
             {/* Home View */}
             {currentView === 'home' && (
                 <>
@@ -911,69 +920,31 @@ function App() {
                                     </div>
 
                                     {/* Right Column: Protected Content */}
-                                    <div className="relative">
+                                    {/* Right Column: Protected Content -> Call to Action */}
+                                    <div className="flex flex-col justify-center h-full space-y-6">
+                                        <div className="bg-gradient-to-br from-red-50 to-white p-6 rounded-2xl border border-red-100 shadow-sm">
+                                            <h4 className="text-lg font-bold text-gray-900 mb-2">Want the A+ blueprint?</h4>
+                                            <p className="text-sm text-gray-600 mb-6 leading-relaxed">
+                                                Access our curated guide for <b>{selectedItem.code}</b>. Includes community notes, video tutorials, and past syllabi.
+                                            </p>
 
-                                        {/* Content Logic */}
-                                        <div className={!hasContributed ? 'blur-content opacity-50' : ''}>
-                                            <div className="mb-6">
-                                                <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
-                                                    <MessageSquare size={18} /> Crowd Tips
-                                                </h4>
-                                                <ul className="space-y-3">
-                                                    {selectedItem.tips.map((tip, i) => (
-                                                        <li key={i} className="text-sm text-gray-600 bg-gray-50 p-3 rounded-md border border-gray-100">
-                                                            "{tip}"
-                                                        </li>
-                                                    ))}
-                                                </ul>
-                                            </div>
-
-                                            <div>
-                                                <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
-                                                    <BookOpen size={18} /> Top Resources
-                                                </h4>
-                                                <div className="space-y-3">
-                                                    {selectedItem.resources.map((r, i) => (
-                                                        <div key={i} className="flex items-start justify-between p-3 rounded-md border border-gray-100 hover:border-red-200 transition bg-white">
-                                                            <div className="flex-1">
-                                                                <div className="flex items-center gap-2 mb-1">
-                                                                    <span className="text-xs font-bold uppercase text-red-600 bg-red-50 px-1.5 rounded">{r.type}</span>
-                                                                    <a href="#" className="text-sm font-medium text-gray-900 hover:underline">{r.title}</a>
-                                                                </div>
-                                                            </div>
-                                                            <button
-                                                                onClick={() => incrementVote(r.id)}
-                                                                className="flex flex-col items-center ml-3 text-gray-400 hover:text-green-600"
-                                                            >
-                                                                <ThumbsUp size={16} />
-                                                                <span className="text-xs font-bold mt-1">{(r.votes || 0) + (resourceVotes[r.id] || 0)}</span>
-                                                            </button>
-                                                        </div>
-                                                    ))}
+                                            <button
+                                                onClick={() => {
+                                                    setSelectedItem(selectedItem); // Keep context
+                                                    setCurrentView('success-guide');
+                                                }}
+                                                className="w-full group relative flex items-center justify-center gap-3 py-3 bg-[#a6192e] hover:bg-[#8a1526] text-white rounded-xl font-bold shadow-lg shadow-red-900/10 hover:shadow-xl hover:shadow-red-900/20 transition-all transform hover:-translate-y-0.5"
+                                            >
+                                                <span>How to succeed in {selectedItem.code.split(' ')[0]}</span>
+                                                <div className="bg-white/20 p-1 rounded-full group-hover:translate-x-1 transition-transform">
+                                                    <ArrowRight size={16} />
                                                 </div>
+                                            </button>
+
+                                            <div className="mt-4 text-center">
+                                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Powered by Crowd Data</span>
                                             </div>
                                         </div>
-
-                                        {/* Gate Overlay */}
-                                        {!hasContributed && (
-                                            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center text-center p-6">
-                                                <div className="bg-white/90 backdrop-blur-md p-6 rounded-xl shadow-xl border border-gray-200 max-w-sm">
-                                                    <div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                                                        <Lock size={24} />
-                                                    </div>
-                                                    <h4 className="text-lg font-bold text-gray-900 mb-2">Unlock Full Insights</h4>
-                                                    <p className="text-sm text-gray-600 mb-4">
-                                                        Contribute just <b>one review</b> to see full topic maps, exam tips, and resource libraries.
-                                                    </p>
-                                                    <button
-                                                        onClick={handleUnlockClick}
-                                                        className="btn btn-primary w-full shadow-lg"
-                                                    >
-                                                        {isSignedIn ? 'Write a 60-second review' : 'Sign in to Unlock'}
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        )}
                                     </div>
                                 </div>
 

@@ -1,0 +1,167 @@
+{
+    "CMPT": {
+        "introduction": "Computing Science at SFU requires a blend of theoretical understanding and practical coding skills. Success comes from starting assignments early and mastering the fundamentals.",
+        "strategies": [
+            {
+                "title": "Start Assignments Early",
+                "description": "CMPT assignments often have hidden edge cases. Starting day one allows time for debugging."
+            },
+            {
+                "title": "Master the Debugger",
+                "description": "Don't rely on print statements. Learning GDB or VS Code debugger saves hours."
+            },
+            {
+                "title": "Lab Attendance",
+                "description": "Labs are often worth small marks but they are the best place to ask TAs clarifying questions."
+            }
+        ],
+        "resources": {
+            "notes": [
+                {
+                    "title": "Data Structures Cheatsheet",
+                    "url": "#",
+                    "votes": 120
+                },
+                {
+                    "title": "Algorithm Complexity Guide",
+                    "url": "#",
+                    "votes": 95
+                }
+            ],
+            "videos": [
+                {
+                    "title": "Pointers and Memory Explained",
+                    "url": "#",
+                    "views": "2.5k"
+                },
+                {
+                    "title": "Recursion Deep Dive",
+                    "url": "#",
+                    "views": "1.8k"
+                }
+            ],
+            "syllabi": [
+                {
+                    "term": "Fall 2025",
+                    "prof": "Dr. Smith",
+                    "url": "#"
+                },
+                {
+                    "term": "Spring 2025",
+                    "prof": "Dr. Li",
+                    "url": "#"
+                }
+            ]
+        }
+    },
+    "BUS": {
+        "introduction": "Beedie School of Business courses focus on application, group work, and case analysis. Networking and participation are key.",
+        "strategies": [
+            {
+                "title": "Participate in Class",
+                "description": "Participation marks can be up to 20%. Speak up at least once per lecture."
+            },
+            {
+                "title": "Network",
+                "description": "Your peers are your future connections. Join business clubs like BASS or SFU JDC West."
+            }
+        ],
+        "resources": {
+            "notes": [
+                {
+                    "title": "Accounting 101 Summary",
+                    "url": "#",
+                    "votes": 200
+                },
+                {
+                    "title": "Marketing Frameworks PDF",
+                    "url": "#",
+                    "votes": 150
+                }
+            ],
+            "videos": [
+                {
+                    "title": "How to Analyze a Case Study",
+                    "url": "#",
+                    "views": "5k"
+                },
+                {
+                    "title": "Financial Ratios Made Easy",
+                    "url": "#",
+                    "views": "3k"
+                }
+            ],
+            "syllabi": [
+                {
+                    "term": "Fall 2025",
+                    "prof": "Dr. Jones",
+                    "url": "#"
+                }
+            ]
+        }
+    },
+    "MATH": {
+        "introduction": "Mathematics requires consistent practice. Don't fall behind, as concepts build on each other sequentially.",
+        "strategies": [
+            {
+                "title": "Do the Practice Problems",
+                "description": "Reading the textbook isn't enough. You must solve problems without looking at the solution."
+            },
+            {
+                "title": "Visit the Workshop",
+                "description": "The Math Workshop in the library is free tutoring. Use it."
+            }
+        ],
+        "resources": {
+            "notes": [
+                {
+                    "title": "Calculus I Integrals Guide",
+                    "url": "#",
+                    "votes": 305
+                },
+                {
+                    "title": "Linear Algebra Vectors Note",
+                    "url": "#",
+                    "votes": 180
+                }
+            ],
+            "videos": [
+                {
+                    "title": "Professor Leonard - Calculus 1",
+                    "url": "#",
+                    "views": "1M+"
+                },
+                {
+                    "title": "Essence of Linear Algebra (3Blue1Brown)",
+                    "url": "#",
+                    "views": "5M+"
+                }
+            ],
+            "syllabi": [
+                {
+                    "term": "Summer 2025",
+                    "prof": "Prof. T",
+                    "url": "#"
+                }
+            ]
+        }
+    },
+    "DEFAULT": {
+        "introduction": "Success in this course is about time management and utilizing available resources effectively.",
+        "strategies": [
+            {
+                "title": "Read the Syllabus",
+                "description": "It contains the schedule, grading scheme, and policy. It is your roadmap."
+            },
+            {
+                "title": "Office Hours",
+                "description": "Professors are waiting for students to visit. It's the best way to get personalized help."
+            }
+        ],
+        "resources": {
+            "notes": [],
+            "videos": [],
+            "syllabi": []
+        }
+    }
+}
