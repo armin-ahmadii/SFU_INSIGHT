@@ -116,6 +116,8 @@ function App() {
     const [majorCourses, setMajorCourses] = useState([]);
     const [loadingCourses, setLoadingCourses] = useState(false);
     const [currentView, setCurrentView] = useState('home'); // 'home' or 'scheduler'
+    const [searchResults, setSearchResults] = useState([]);
+    const [searchLoading, setSearchLoading] = useState(false);
 
     // Fetch departments (majors) on component mount - using same API as Scheduler
     useEffect(() => {
@@ -171,26 +173,96 @@ function App() {
         fetchCourses();
     }, [selectedMajor]);
 
-    // Search Logic
+    // Search Logic - fetch from API based on search input
+    useEffect(() => {
+        if (!search.trim()) {
+            setSearchResults([]);
+            return;
+        }
+
+        const query = search.trim().toUpperCase();
+
+        // Parse course code format: "CMPT 120" or "CMPT120"
+        const courseMatch = query.match(/^([A-Z]{2,4})\s*(\d{3})?$/);
+
+        if (!courseMatch) {
+            // If no valid pattern, search in majorCourses if available
+            if (majorCourses.length > 0) {
+                const filtered = majorCourses.filter(c =>
+                    (c.value && c.value.includes(query.replace(/[A-Z]+\s*/, ''))) ||
+                    (c.title && c.title.toUpperCase().includes(query))
+                ).map(c => ({
+                    type: 'course',
+                    data: {
+                        id: `${selectedMajor}-${c.value}`,
+                        code: `${selectedMajor.toUpperCase()} ${c.value}`,
+                        title: c.title || 'Course',
+                        term: 'Spring 2025',
+                        description: `${selectedMajor.toUpperCase()} ${c.value} - ${c.title || 'Course details'}`,
+                        metrics: { difficulty: 3.5, workload: 8, fairness: 4.0, clarity: 4.0, n: 0 },
+                        assessment: [],
+                        tips: [],
+                        resources: []
+                    }
+                }));
+                setSearchResults(filtered);
+            }
+            return;
+        }
+
+        const dept = courseMatch[1].toLowerCase();
+        const courseNum = courseMatch[2];
+
+        const timer = setTimeout(async () => {
+            setSearchLoading(true);
+            try {
+                // Fetch courses from the department
+                const courses = await getCourses('2025', 'spring', dept);
+
+                if (Array.isArray(courses)) {
+                    let filtered = courses;
+
+                    // If course number specified, filter to that course
+                    if (courseNum) {
+                        filtered = courses.filter(c => c.value === courseNum || c.text === courseNum);
+                    }
+
+                    // Transform to result format
+                    const results = filtered.slice(0, 20).map(c => ({
+                        type: 'course',
+                        data: {
+                            id: `${dept}-${c.value}`,
+                            code: `${dept.toUpperCase()} ${c.value}`,
+                            title: c.title || 'Course',
+                            term: 'Spring 2025',
+                            description: `${dept.toUpperCase()} ${c.value} - ${c.title || 'Course details'}`,
+                            dept: dept,
+                            courseNum: c.value,
+                            metrics: { difficulty: 3.5, workload: 8, fairness: 4.0, clarity: 4.0, n: 0 },
+                            assessment: [],
+                            tips: [],
+                            resources: []
+                        }
+                    }));
+                    setSearchResults(results);
+                }
+            } catch (error) {
+                console.error('Search failed:', error);
+                setSearchResults([]);
+            } finally {
+                setSearchLoading(false);
+            }
+        }, 300); // Debounce 300ms
+
+        return () => clearTimeout(timer);
+    }, [search, majorCourses, selectedMajor]);
+
+    // Filter results by active tab
     const results = useMemo(() => {
-        if (!search.trim()) return [];
-
-        const query = search.toLowerCase();
-
-        const matchedCourses = COURSES.filter(c =>
-            c.code.toLowerCase().includes(query) ||
-            c.title.toLowerCase().includes(query)
-        ).map(c => ({ type: 'course', data: c }));
-
-        const matchedProfs = PROFS.filter(p =>
-            p.name.toLowerCase().includes(query) ||
-            p.course.toLowerCase().includes(query)
-        ).map(p => ({ type: 'prof', data: p }));
-
-        if (activeTab === 'Courses') return matchedCourses;
-        if (activeTab === 'Professors') return matchedProfs;
-        return [...matchedCourses, ...matchedProfs];
-    }, [search, activeTab]);
+        if (activeTab === 'Courses') return searchResults.filter(r => r.type === 'course');
+        if (activeTab === 'Professors') return searchResults.filter(r => r.type === 'prof');
+        return searchResults;
+    }, [searchResults, activeTab]);
 
     const toggleSave = (e, id) => {
         e.stopPropagation();
@@ -442,37 +514,43 @@ function App() {
                     {search && (
                         <section className="container max-w-4xl mb-20 animate-fade-in">
                             <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4 ml-1">
-                                {results.length} Result{results.length !== 1 && 's'} Found
+                                {searchLoading ? 'Searching...' : `${results.length} Result${results.length !== 1 ? 's' : ''} Found`}
                             </h3>
 
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {results.map((item, idx) => (
-                                    item.type === 'course' ? (
-                                        <CourseCard
-                                            key={item.data.id}
-                                            course={item.data}
-                                            saved={savedCourses.has(item.data.id)}
-                                            onToggleSave={(e) => toggleSave(e, item.data.id)}
-                                            onClick={() => setSelectedItem(item.data)}
-                                        />
-                                    ) : (
-                                        <ProfCard
-                                            key={item.data.id}
-                                            prof={item.data}
-                                            onClick={() => {
-                                                // Find related course to show insights for
-                                                const relatedCourse = COURSES.find(c => c.id === item.data.courseId);
-                                                if (relatedCourse) setSelectedItem(relatedCourse);
-                                            }}
-                                        />
-                                    )
-                                ))}
-                                {results.length === 0 && (
-                                    <div className="col-span-full py-12 text-center text-gray-400">
-                                        No results found. Try "CMPT", "Math", or "Smith".
-                                    </div>
-                                )}
-                            </div>
+                            {searchLoading ? (
+                                <div style={{ padding: '3rem', textAlign: 'center', color: '#6b7280' }}>
+                                    <div style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>🔍</div>
+                                    Searching courses...
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {results.map((item, idx) => (
+                                        item.type === 'course' ? (
+                                            <CourseCard
+                                                key={item.data.id}
+                                                course={item.data}
+                                                saved={savedCourses.has(item.data.id)}
+                                                onToggleSave={(e) => toggleSave(e, item.data.id)}
+                                                onClick={() => setSelectedItem(item.data)}
+                                            />
+                                        ) : (
+                                            <ProfCard
+                                                key={item.data.id}
+                                                prof={item.data}
+                                                onClick={() => {
+                                                    const relatedCourse = COURSES.find(c => c.id === item.data.courseId);
+                                                    if (relatedCourse) setSelectedItem(relatedCourse);
+                                                }}
+                                            />
+                                        )
+                                    ))}
+                                    {results.length === 0 && (
+                                        <div className="col-span-full py-12 text-center text-gray-400">
+                                            No results found. Try "CMPT 120" or "MATH 151".
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </section>
                     )}
 
@@ -697,9 +775,10 @@ function App() {
                     )}
 
                 </>
-            )}
+            )
+            }
 
-        </div>
+        </div >
     );
 }
 
