@@ -292,7 +292,11 @@ app.post('/api/contributions', requireAuth, async (req, res) => {
         res.json({ success: true, contribution: data });
     } catch (error) {
         console.error('Error creating contribution:', error);
-        res.status(500).json({ error: 'Failed to create contribution' });
+        res.status(500).json({
+            error: 'Failed to create contribution',
+            details: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
     }
 });
 
@@ -360,7 +364,7 @@ app.post('/api/contributions/upload', requireAuth, async (req, res) => {
         res.json({ success: true, contribution: data });
     } catch (error) {
         console.error('Error uploading contribution:', error);
-        res.status(500).json({ error: 'Failed to upload contribution' });
+        res.status(500).json({ error: 'Failed to upload contribution', details: error.message });
     }
 });
 
@@ -689,6 +693,6 @@ app.delete('/api/schedules/:term', requireAuth, async (req, res) => {
     }
 });
 
-app.listen(PORT, () => {
-    console.log(`Proxy server running on http://localhost:${PORT}`);
+app.listen(PORT, '127.0.0.1', () => {
+    console.log(`Proxy server running on http://127.0.0.1:${PORT}`);
 });

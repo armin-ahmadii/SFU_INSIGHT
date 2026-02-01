@@ -1,28 +1,36 @@
 // API client for contributions
-const API_BASE = 'http://localhost:3001';
+const API_BASE = 'http://127.0.0.1:3001';
 
 export async function createContribution({
     courseCode, type, title, body, url, displayName,
     section, mattersIntensity, resourceType
 }, token) {
-    const response = await fetch(`${API_BASE}/api/contributions`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-            courseCode, type, title, body, url, displayName,
-            section, mattersIntensity, resourceType
-        })
-    });
+    try {
+        const response = await fetch(`${API_BASE}/api/contributions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+                courseCode, type, title, body, url, displayName,
+                section, mattersIntensity, resourceType
+            })
+        });
 
-    if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to create contribution');
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to create contribution');
+        }
+
+        return response.json();
+    } catch (err) {
+        console.error('[API ERROR] createContribution failed:', err);
+        if (err.message === 'Failed to fetch') {
+            throw new Error('Could not connect to the server. Please ensure the backend is running at http://127.0.0.1:3001');
+        }
+        throw err;
     }
-
-    return response.json();
 }
 
 
