@@ -2,12 +2,13 @@ import React, { useState, useMemo, useEffect } from 'react';
 import {
     Search, BookOpen, Star, User, Lock, ExternalLink,
     ThumbsUp, X, Bookmark, BarChart2, MessageSquare,
-    CheckCircle, Zap, ShieldCheck
+    CheckCircle, Zap, ShieldCheck, ArrowRight
 } from 'lucide-react';
 
-import { SignedIn, SignedOut, SignInButton, UserButton } from '@clerk/clerk-react';
-import { getDepartments } from './api/sfuCoursesApi';
+import { SignedIn, SignedOut, SignInButton, UserButton, useUser, useClerk } from '@clerk/clerk-react';
+import { getDepartments, getCourses, startProfessorAggregation } from './api/sfuScheduleApi';
 import Scheduler from './components/Scheduler';
+import CourseSuccessGuide from './components/CourseSuccessGuide';
 
 
 // --- MOCK DATA ---
@@ -56,7 +57,7 @@ const COURSES = [
         id: 'c3',
         code: 'BUS 201',
         title: 'Introduction to Business',
-        term: 'Fall 2025',
+        term: 'Spring 2026',
         description: 'An overview of the business environment and the role of business in society.',
         metrics: { difficulty: 2.1, workload: 5, fairness: 4.8, clarity: 4.9, n: 89 },
         assessment: ['Group Project: 40%', 'Exam: 60%'],
@@ -102,60 +103,274 @@ const PROFS = [
 // --- APP COMPONENT ---
 
 function App() {
+    const { user, isLoaded, isSignedIn } = useUser();
+    const { openSignIn } = useClerk();
+
     const [search, setSearch] = useState('');
     const [activeTab, setActiveTab] = useState('All'); // All, Courses, Professors
     const [selectedItem, setSelectedItem] = useState(null); // For modal
     const [savedCourses, setSavedCourses] = useState(new Set(['c1']));
-    const [hasContributed, setHasContributed] = useState(false);
     const [showContributionForm, setShowContributionForm] = useState(false);
     const [resourceVotes, setResourceVotes] = useState({});
     const [majors, setMajors] = useState([]);
+    const [professors, setProfessors] = useState([]); // Store aggregated professors
     const [selectedMajor, setSelectedMajor] = useState('');
     const [showMajorDropdown, setShowMajorDropdown] = useState(false);
     const [loadingMajors, setLoadingMajors] = useState(false);
+    const [majorCourses, setMajorCourses] = useState([]);
+    const [loadingCourses, setLoadingCourses] = useState(false);
     const [currentView, setCurrentView] = useState('home'); // 'home' or 'scheduler'
+    const [searchResults, setSearchResults] = useState([]); // Kept for flat list compatibility if needed
+    const [groupedResults, setGroupedResults] = useState([]); // New grouped structure
+    const [searchLoading, setSearchLoading] = useState(false);
+    const [submittingReview, setSubmittingReview] = useState(false);
 
-    // Fetch majors on component mount
+    // Derived state for contribution
+    const hasContributed = user?.publicMetadata?.hasContributed === true;
+
+    const [courseCache, setCourseCache] = useState({}); // Cache courses by department
+    const [showSuggestions, setShowSuggestions] = useState(false);
+
+    // Filter departments for autocomplete suggestions
+    // Simplified department filtering - just returns matching depts for internal use
+    const filteredMajors = useMemo(() => {
+        if (!search.trim()) return [];
+        const query = search.trim().toUpperCase();
+        const letters = query.match(/[A-Z]+/)?.[0] || '';
+        if (!letters) return [];
+        return majors.filter(m => {
+            const deptCode = (m.text || m.value || m).toUpperCase();
+            return deptCode.startsWith(letters);
+        });
+    }, [search, majors]);
+
+    const [browseMode, setBrowseMode] = useState(false);
+    const [browseLetter, setBrowseLetter] = useState('A'); // Default to A
+
+    // Derived browse results
+    const browseResults = useMemo(() => {
+        if (!browseMode) return [];
+        if (activeTab === 'Courses') { // Browsing Departments/Majors
+            return majors.filter(m => {
+                const name = m.text || m.value || '';
+                return name.toUpperCase().startsWith(browseLetter);
+            }).sort((a, b) => (a.text || '').localeCompare(b.text || ''));
+        } else if (activeTab === 'Professors') {
+            return professors.filter(p => p.name.toUpperCase().startsWith(browseLetter)).sort((a, b) => a.name.localeCompare(b.name));
+        }
+        return [];
+    }, [activeTab, browseLetter, majors, browseMode]);
+    // Fetch departments (majors) on component mount - using same API as Scheduler
+    // Fetch departments and professors on component mount
     useEffect(() => {
-        async function fetchMajors() {
+        async function fetchData() {
             setLoadingMajors(true);
             try {
-                const data = await getDepartments();
-                // If data is an array of strings, use directly; otherwise extract department names
-                if (Array.isArray(data)) {
-                    setMajors(data);
+                // Fetch Majors
+                const majorsData = await getDepartments('2026', 'spring');
+                if (Array.isArray(majorsData)) {
+                    setMajors(majorsData);
+                }
+
+                // Start Progressive Professor Scan
+                if (typeof startProfessorAggregation === 'function') {
+                    startProfessorAggregation('2026', 'spring', (newProfs) => {
+                        setProfessors(prev => {
+                            const combined = [...prev, ...newProfs];
+                            // Remove duplicates by ID just in case
+                            const unique = Array.from(new Map(combined.map(item => [item.id, item])).values());
+                            return unique.sort((a, b) => a.name.localeCompare(b.name));
+                        });
+                    });
                 }
             } catch (error) {
-                console.error('Failed to fetch majors:', error);
-                // Fallback to common SFU departments if API fails
-                setMajors(['CMPT', 'MACM', 'MATH', 'PHYS', 'CHEM', 'BISC', 'STAT', 'ECON', 'BUS', 'PSYC', 'ENSC', 'IAT', 'HSCI', 'ENGL', 'HIST', 'POL', 'CRIM', 'SA', 'GEOG', 'KIN']);
+                // Fallback departments
+                setMajors([
+                    { value: 'cmpt', text: 'CMPT', name: 'Computing Science' },
+                    { value: 'macm', text: 'MACM', name: 'Mathematics and Computing' },
+                    { value: 'math', text: 'MATH', name: 'Mathematics' },
+                    { value: 'phys', text: 'PHYS', name: 'Physics' },
+                    { value: 'chem', text: 'CHEM', name: 'Chemistry' },
+                    { value: 'bisc', text: 'BISC', name: 'Biological Sciences' },
+                    { value: 'stat', text: 'STAT', name: 'Statistics' },
+                    { value: 'econ', text: 'ECON', name: 'Economics' },
+                    { value: 'bus', text: 'BUS', name: 'Business' },
+                    { value: 'psyc', text: 'PSYC', name: 'Psychology' }
+                ]);
             } finally {
                 setLoadingMajors(false);
             }
         }
-        fetchMajors();
+        fetchData();
     }, []);
 
-    // Search Logic
+    // Fetch courses when a major is selected
+    useEffect(() => {
+        if (!selectedMajor) {
+            setMajorCourses([]);
+            return;
+        }
+        async function fetchCourses() {
+            setLoadingCourses(true);
+            try {
+                const data = await getCourses('2026', 'spring', selectedMajor);
+                if (Array.isArray(data)) {
+                    setMajorCourses(data);
+                }
+            } catch (error) {
+                console.error('Failed to fetch courses:', error);
+                setMajorCourses([]);
+            } finally {
+                setLoadingCourses(false);
+            }
+        }
+        fetchCourses();
+    }, [selectedMajor]);
+
+    // Search Logic - fetch from API based on search input
+    // Search Logic - fetch from API based on search input
+    useEffect(() => {
+        // Clear results if search is empty
+        if (!search.trim()) {
+            setSearchResults([]);
+            setGroupedResults([]);
+            return;
+        }
+
+        const query = search.trim().toUpperCase();
+
+        // Extract letters (department) and numbers (course number) from query
+        const letters = query.match(/[A-Z]+/)?.[0] || '';
+
+        // Check for matching professors locally
+        const matchingProfs = professors.filter(p => p.name.toUpperCase().includes(query)).map(p => ({
+            type: 'prof',
+            data: {
+                id: p.id,
+                name: p.name,
+                dept: p.dept,
+                email: p.email,
+                courseId: null // Link to course if possible
+            }
+        }));
+
+        // Find match departments for course search
+        const matchingDepts = majors.filter(m => {
+            const deptCode = (m.text || m.value || m).toUpperCase();
+            return deptCode.startsWith(letters);
+        }).slice(0, 5); // Limit to top 5 matching departments
+
+        const fetchGroupedCourses = async () => {
+            setSearchLoading(true);
+            try {
+                let validGroups = [];
+                let courseResults = [];
+
+                if (matchingDepts.length > 0) {
+                    // Fetch courses for all matching departments in parallel
+                    const promises = matchingDepts.map(async (major) => {
+                        const deptCode = (major.text || major.value || major).toLowerCase();
+                        const deptName = major.name || deptCode.toUpperCase();
+
+                        // Check cache first
+                        if (courseCache[deptCode]) {
+                            return { dept: deptCode, name: deptName, courses: courseCache[deptCode] };
+                        }
+
+                        // Fetch if not cached
+                        try {
+                            const courses = await getCourses('2026', 'spring', deptCode);
+                            if (Array.isArray(courses)) {
+                                return { dept: deptCode, name: deptName, courses };
+                            }
+                        } catch (e) {
+                            console.error(`Failed to fetch ${deptCode}`, e);
+                        }
+                        return null;
+                    });
+
+                    const results = await Promise.all(promises);
+
+                    // Filter valid results and update cache
+                    const newCache = {};
+                    validGroups = results.filter(r => r && Array.isArray(r.courses) && r.courses.length > 0);
+
+                    validGroups.forEach(g => {
+                        if (!courseCache[g.dept]) {
+                            newCache[g.dept] = g.courses;
+                        }
+                    });
+
+                    if (Object.keys(newCache).length > 0) {
+                        setCourseCache(prev => ({ ...prev, ...newCache }));
+                    }
+
+                    // Filter courses by number OR title (description) if provided
+                    const grouped = validGroups.map(group => {
+                        let filtered = group.courses;
+                        const deptStr = group.dept.toUpperCase();
+                        const queryTerm = query.replace(deptStr, '').trim();
+
+                        if (queryTerm) {
+                            filtered = group.courses.filter(c => {
+                                const numberMatch = (c.value && c.value.startsWith(queryTerm)) ||
+                                    (c.text && c.text.startsWith(queryTerm));
+                                const titleMatch = c.title && c.title.toUpperCase().includes(queryTerm);
+                                return numberMatch || titleMatch;
+                            });
+                        }
+
+                        return {
+                            dept: group.dept,
+                            name: group.name,
+                            courses: filtered.slice(0, 10).map(c => ({
+                                type: 'course',
+                                data: {
+                                    id: `${group.dept}-${c.value}`,
+                                    code: `${group.dept.toUpperCase()} ${c.value}`,
+                                    title: c.title || 'Course',
+                                    term: 'Spring 2026',
+                                    description: `${group.dept.toUpperCase()} ${c.value} - ${c.title || 'Course details'}`,
+                                    dept: group.dept,
+                                    courseNum: c.value,
+                                    metrics: { difficulty: 3.5, workload: 8, fairness: 4.0, clarity: 4.0, n: 0 },
+                                    assessment: [],
+                                    tips: [],
+                                    resources: []
+                                }
+                            }))
+                        };
+                    }).filter(group => group.courses.length > 0);
+
+                    // Update grouped results for dropdown
+                    setGroupedResults(grouped);
+                    courseResults = grouped.flatMap(g => g.courses);
+                } else {
+                    setGroupedResults([]);
+                }
+
+                // Combine results: Professors + Courses
+                setSearchResults([...matchingProfs, ...courseResults]);
+
+            } catch (error) {
+                console.error('Search failed:', error);
+                setSearchResults(matchingProfs); // At least show profs if course fetch fails
+                setGroupedResults([]);
+            } finally {
+                setSearchLoading(false);
+            }
+        };
+
+        const timer = setTimeout(fetchGroupedCourses, 300);
+        return () => clearTimeout(timer);
+    }, [search, majors, courseCache, professors]);
+
+    // Filter results by active tab
     const results = useMemo(() => {
-        if (!search.trim()) return [];
-
-        const query = search.toLowerCase();
-
-        const matchedCourses = COURSES.filter(c =>
-            c.code.toLowerCase().includes(query) ||
-            c.title.toLowerCase().includes(query)
-        ).map(c => ({ type: 'course', data: c }));
-
-        const matchedProfs = PROFS.filter(p =>
-            p.name.toLowerCase().includes(query) ||
-            p.course.toLowerCase().includes(query)
-        ).map(p => ({ type: 'prof', data: p }));
-
-        if (activeTab === 'Courses') return matchedCourses;
-        if (activeTab === 'Professors') return matchedProfs;
-        return [...matchedCourses, ...matchedProfs];
-    }, [search, activeTab]);
+        if (activeTab === 'Courses') return searchResults.filter(r => r.type === 'course');
+        if (activeTab === 'Professors') return searchResults.filter(r => r.type === 'prof');
+        return searchResults;
+    }, [searchResults, activeTab]);
 
     const toggleSave = (e, id) => {
         e.stopPropagation();
@@ -165,12 +380,43 @@ function App() {
         setSavedCourses(next);
     };
 
-    const handleCreateReview = (e) => {
+    const handleCreateReview = async (e) => {
         e.preventDefault();
-        setTimeout(() => {
-            setHasContributed(true);
-            setShowContributionForm(false);
-        }, 800);
+        setSubmittingReview(true);
+
+        try {
+            // Collect form data (simplified for now)
+            const formData = {
+                courseCode: e.target[1].value,
+                // ... other fields
+            };
+
+            const response = await fetch('http://localhost:3001/api/reviews', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId: user.id, reviewData: formData })
+            });
+
+            if (response.ok) {
+                await user.reload(); // Reload user to fetch updated metadata
+                setShowContributionForm(false);
+            } else {
+                alert('Failed to submit review. Please try again.');
+            }
+        } catch (error) {
+            console.error(error);
+            alert('An error occurred.');
+        } finally {
+            setSubmittingReview(false);
+        }
+    };
+
+    const handleUnlockClick = () => {
+        if (!isSignedIn) {
+            openSignIn();
+        } else {
+            setShowContributionForm(true);
+        }
     };
 
     const incrementVote = (rId) => {
@@ -186,11 +432,19 @@ function App() {
             {/* Header */}
             <header style={{ position: 'sticky', top: 0, zIndex: 40, backgroundColor: '#5c0a1f', borderBottom: '2px solid #3d0614', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
                 <div className="w-full px-8 h-24 flex items-center justify-between">
-                    <div className="flex items-center gap-4 cursor-pointer" onClick={() => { setSearch(''); setSelectedItem(null); }}>
-                        <div style={{ backgroundColor: 'rgba(255,255,255,0.15)', padding: '0.75rem', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.25)' }}>
+                    <div
+                        className="flex items-center gap-4 cursor-pointer"
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => { setSearch(''); setSelectedItem(null); setCurrentView('home'); }}
+                    >
+                        <div style={{ padding: '0.75rem' }}>
                             <BookOpen size={36} strokeWidth={2.5} color="white" />
                         </div>
-                        <span style={{ fontSize: '2.5rem', fontWeight: 'bold', color: 'white', textShadow: '0 2px 4px rgba(0,0,0,0.3)' }}>SFU Insight</span>
+                        <span
+                            style={{ fontSize: '2.5rem', fontWeight: 'bold', color: 'white', textShadow: '0 2px 4px rgba(0,0,0,0.3)', transition: 'all 0.2s' }}
+                            onMouseOver={(e) => { e.currentTarget.style.transform = 'scale(1.05)'; e.currentTarget.style.textShadow = '0 4px 12px rgba(255,255,255,0.3)'; }}
+                            onMouseOut={(e) => { e.currentTarget.style.transform = 'scale(1)'; e.currentTarget.style.textShadow = '0 2px 4px rgba(0,0,0,0.3)'; }}
+                        >SFU Insight</span>
                     </div>
 
                     <nav style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
@@ -227,6 +481,14 @@ function App() {
             {/* Scheduler View */}
             {currentView === 'scheduler' && <Scheduler />}
 
+            {/* Success Guide View */}
+            {currentView === 'success-guide' && (
+                <CourseSuccessGuide
+                    course={selectedItem}
+                    onBack={() => setCurrentView('home')}
+                />
+            )}
+
             {/* Home View */}
             {currentView === 'home' && (
                 <>
@@ -240,14 +502,83 @@ function App() {
                         , real difficulty, instructor vibeWorkloads, topic maps, and best resources—powered by students like you.
                     </p> */}
 
-                            <div className="max-w-2xl mx-auto mb-8">
+                            <div className="max-w-2xl mx-auto mb-8" style={{ position: 'relative' }}>
                                 <input
                                     type="text"
-                                    placeholder="Course code, title, description, or professor name..." className="search-input"
+                                    placeholder="Search departments (e.g., CMPT, BUS, MATH)..."
+                                    className="search-input"
                                     value={search}
                                     onChange={(e) => setSearch(e.target.value)}
+                                    onFocus={() => setShowSuggestions(true)}
+                                    onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
                                     autoFocus
                                 />
+
+                                {/* Autocomplete Dropdown - Grouped by Faculty */}
+                                {showSuggestions && (groupedResults.length > 0) && (
+                                    <div style={{
+                                        position: 'absolute',
+                                        top: '100%',
+                                        left: 0,
+                                        right: 0,
+                                        marginTop: '0.5rem',
+                                        backgroundColor: 'white',
+                                        border: '1px solid #e5e7eb',
+                                        borderRadius: '12px',
+                                        boxShadow: '0 10px 40px rgba(0,0,0,0.15)',
+                                        overflowY: 'auto',
+                                        maxHeight: '400px',
+                                        zIndex: 100
+                                    }}>
+                                        {groupedResults.map((group) => (
+                                            <div key={group.dept}>
+                                                {/* Faculty/Dept Header */}
+                                                <div style={{
+                                                    padding: '0.75rem 1.25rem',
+                                                    backgroundColor: '#f9fafb',
+                                                    borderBottom: '1px solid #f3f4f6',
+                                                    display: 'flex',
+                                                    justifyContent: 'space-between',
+                                                    alignItems: 'center',
+                                                    position: 'sticky',
+                                                    top: 0
+                                                }}>
+                                                    <span style={{ fontWeight: '700', color: '#a6192e', fontSize: '0.875rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                                        {group.name} ({group.dept.toUpperCase()})
+                                                    </span>
+                                                </div>
+
+                                                {/* Courses List */}
+                                                {group.courses.map((result) => (
+                                                    <div
+                                                        key={result.data.id}
+                                                        onClick={() => {
+                                                            setSelectedItem(result.data);
+                                                            setShowSuggestions(false);
+                                                        }}
+                                                        style={{
+                                                            padding: '0.75rem 1.25rem',
+                                                            cursor: 'pointer',
+                                                            borderBottom: '1px solid #f3f4f6',
+                                                            display: 'flex',
+                                                            alignItems: 'center',
+                                                            gap: '0.75rem'
+                                                        }}
+                                                        onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#fef2f2'}
+                                                        onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'white'}
+                                                    >
+                                                        <span style={{ fontWeight: '600', color: '#1f2937', fontSize: '0.9375rem', minWidth: '80px' }}>
+                                                            {result.data.code}
+                                                        </span>
+                                                        <span style={{ fontSize: '0.875rem', color: '#4b5563', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                            {result.data.title}
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
 
                             <div className="flex items-center justify-center gap-3">
@@ -284,7 +615,7 @@ function App() {
                                     }}
                                 >
                                     <BookOpen size={20} />
-                                    {selectedMajor || 'Select Your Major'}
+                                    {selectedMajor ? selectedMajor.toUpperCase() : 'Select Your Major'}
                                     <span style={{ marginLeft: '0.25rem', fontSize: '0.75rem' }}>{showMajorDropdown ? '▲' : '▼'}</span>
                                 </button>
 
@@ -301,17 +632,17 @@ function App() {
                                         boxShadow: '0 10px 40px rgba(0,0,0,0.15)',
                                         maxHeight: '300px',
                                         overflowY: 'auto',
-                                        width: '280px',
+                                        width: '320px',
                                         zIndex: 100
                                     }}>
                                         {loadingMajors ? (
-                                            <div style={{ padding: '1rem', textAlign: 'center', color: '#6b7280' }}>Loading majors...</div>
+                                            <div style={{ padding: '1rem', textAlign: 'center', color: '#6b7280' }}>Loading departments...</div>
                                         ) : (
                                             majors.map((major, idx) => (
                                                 <div
-                                                    key={idx}
+                                                    key={major.value || idx}
                                                     onClick={() => {
-                                                        setSelectedMajor(typeof major === 'string' ? major : major.name || major.value);
+                                                        setSelectedMajor(major.value || major);
                                                         setShowMajorDropdown(false);
                                                     }}
                                                     style={{
@@ -325,83 +656,209 @@ function App() {
                                                     onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#f9fafb'}
                                                     onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                                                 >
-                                                    {typeof major === 'string' ? major : major.name || major.value}
+                                                    <span style={{ fontWeight: '600' }}>{major.text || major}</span>
+                                                    {major.name && <span style={{ color: '#6b7280', marginLeft: '0.5rem' }}>- {major.name}</span>}
                                                 </div>
                                             ))
                                         )}
                                     </div>
                                 )}
                             </div>
+
+                            {/* Course List When Major Selected */}
+                            {selectedMajor && (
+                                <div style={{ marginTop: '2rem', textAlign: 'left', maxWidth: '600px', margin: '2rem auto 0' }}>
+                                    <h3 style={{ fontSize: '1.125rem', fontWeight: '700', color: '#1f2937', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                        <BookOpen size={20} color="#a6192e" />
+                                        {selectedMajor.toUpperCase()} Courses
+                                        <span style={{ fontSize: '0.875rem', fontWeight: '400', color: '#6b7280' }}>
+                                            ({majorCourses.length} courses)
+                                        </span>
+                                    </h3>
+
+                                    {loadingCourses ? (
+                                        <div style={{ padding: '2rem', textAlign: 'center', color: '#6b7280' }}>
+                                            Loading courses...
+                                        </div>
+                                    ) : majorCourses.length > 0 ? (
+                                        <div style={{
+                                            display: 'grid',
+                                            gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+                                            gap: '0.75rem',
+                                            maxHeight: '400px',
+                                            overflowY: 'auto',
+                                            padding: '0.5rem'
+                                        }}>
+                                            {majorCourses.map((course, idx) => (
+                                                <div
+                                                    key={course.value || idx}
+                                                    onClick={() => setSearch(`${selectedMajor.toUpperCase()} ${course.value || course.text}`)}
+                                                    style={{
+                                                        padding: '0.875rem',
+                                                        backgroundColor: 'white',
+                                                        border: '1px solid #e5e7eb',
+                                                        borderRadius: '10px',
+                                                        cursor: 'pointer',
+                                                        transition: 'all 0.2s',
+                                                        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+                                                    }}
+                                                    onMouseOver={(e) => {
+                                                        e.currentTarget.style.borderColor = '#a6192e';
+                                                        e.currentTarget.style.transform = 'translateY(-2px)';
+                                                        e.currentTarget.style.boxShadow = '0 4px 12px rgba(166,25,46,0.15)';
+                                                    }}
+                                                    onMouseOut={(e) => {
+                                                        e.currentTarget.style.borderColor = '#e5e7eb';
+                                                        e.currentTarget.style.transform = 'translateY(0)';
+                                                        e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.05)';
+                                                    }}
+                                                >
+                                                    <div style={{ fontWeight: '600', color: '#a6192e', fontSize: '0.9375rem' }}>
+                                                        {selectedMajor.toUpperCase()} {course.value || course.text}
+                                                    </div>
+                                                    {course.title && (
+                                                        <div style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem', lineHeight: '1.3' }}>
+                                                            {course.title}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <div style={{ padding: '2rem', textAlign: 'center', color: '#9ca3af' }}>
+                                            No courses found for this department.
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     </section>
 
-                    {/* 3. Results Area */}
-                    {search && (
+                    {/* 3. Results Area - Hide when searching via dropdown, or show if they hit enter/selected something */}
+                    {search && !showSuggestions && (
                         <section className="container max-w-4xl mb-20 animate-fade-in">
                             <h3 className="text-sm font-bold text-gray-400 uppercase tracking-wider mb-4 ml-1">
-                                {results.length} Result{results.length !== 1 && 's'} Found
+                                {searchLoading ? 'Searching...' : `${results.length} Result${results.length !== 1 ? 's' : ''} Found`}
                             </h3>
 
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                {results.map((item, idx) => (
-                                    item.type === 'course' ? (
-                                        <CourseCard
-                                            key={item.data.id}
-                                            course={item.data}
-                                            saved={savedCourses.has(item.data.id)}
-                                            onToggleSave={(e) => toggleSave(e, item.data.id)}
-                                            onClick={() => setSelectedItem(item.data)}
-                                        />
-                                    ) : (
-                                        <ProfCard
-                                            key={item.data.id}
-                                            prof={item.data}
-                                            onClick={() => {
-                                                // Find related course to show insights for
-                                                const relatedCourse = COURSES.find(c => c.id === item.data.courseId);
-                                                if (relatedCourse) setSelectedItem(relatedCourse);
-                                            }}
-                                        />
-                                    )
-                                ))}
-                                {results.length === 0 && (
-                                    <div className="col-span-full py-12 text-center text-gray-400">
-                                        No results found. Try "CMPT", "Math", or "Smith".
-                                    </div>
-                                )}
-                            </div>
+                            {searchLoading ? (
+                                <div style={{ padding: '3rem', textAlign: 'center', color: '#6b7280' }}>
+                                    <div style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>🔍</div>
+                                    Searching courses...
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {results.map((item, idx) => (
+                                        item.type === 'course' ? (
+                                            <CourseCard
+                                                key={item.data.id}
+                                                course={item.data}
+                                                saved={savedCourses.has(item.data.id)}
+                                                onToggleSave={(e) => toggleSave(e, item.data.id)}
+                                                onClick={() => setSelectedItem(item.data)}
+                                            />
+                                        ) : (
+                                            <ProfCard
+                                                key={item.data.id}
+                                                prof={item.data}
+                                                onClick={() => {
+                                                    const relatedCourse = COURSES.find(c => c.id === item.data.courseId);
+                                                    if (relatedCourse) setSelectedItem(relatedCourse);
+                                                }}
+                                            />
+                                        )
+                                    ))}
+                                    {results.length === 0 && (
+                                        <div className="col-span-full py-12 text-center text-gray-400">
+                                            No results found. Try "CMPT 120" or "MATH 151".
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </section>
                     )}
 
-                    {/* 4. Default Homepage Content (if no search) */}
+                    {/* 4. Browse Interface (replaces default content) */}
                     {!search && (
-                        <section className="container max-w-4xl">
-                            <div className="grid md:grid-cols-2 gap-8">
-                                <div>
-                                    <h3 className="flex items-center gap-2 font-bold text-gray-800 mb-4">
-                                        <Zap size={18} className="text-amber-500" /> Popular this term
+                        <section className="container max-w-4xl animate-fade-in">
+                            {/* Alphabet Scroll for Browse */}
+                            <div className="flex flex-wrap justify-center gap-2 mb-10 px-4">
+                                {['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'].map(letter => (
+                                    <button
+                                        key={letter}
+                                        onClick={() => {
+                                            setBrowseMode(true);
+                                            setBrowseLetter(letter);
+                                            // Make sure we are in a valid browse tab
+                                            if (activeTab === 'All') setActiveTab('Courses');
+                                        }}
+                                        className={`w-8 h-8 flex items-center justify-center rounded-full text-sm font-bold transition-all ${browseLetter === letter
+                                            ? 'bg-[#a6192e] text-white shadow-md transform scale-110'
+                                            : 'bg-white text-gray-400 hover:bg-red-50 hover:text-[#a6192e]'
+                                            }`}
+                                    >
+                                        {letter}
+                                    </button>
+                                ))}
+                            </div>
+
+                            <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden min-h-[400px]">
+                                <div className="p-6 border-b border-gray-100 flex justify-between items-center">
+                                    <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
+                                        {activeTab === 'Professors' ? <User size={24} className="text-[#a6192e]" /> : <BookOpen size={24} className="text-[#a6192e]" />}
+                                        Browsing {activeTab === 'All' ? 'Courses' : activeTab} - <span className="text-[#a6192e]">{browseLetter}</span>
                                     </h3>
-                                    <div className="flex flex-wrap gap-2">
-                                        {COURSES.map(c => (
-                                            <div key={c.id} onClick={() => setSelectedItem(c)} className="bg-white border hover:border-red-300 cursor-pointer px-3 py-2 rounded-md shadow-sm text-sm font-medium text-gray-700">
-                                                {c.code}
-                                            </div>
-                                        ))}
-                                    </div>
+                                    <span className="text-sm text-gray-500 font-medium">
+                                        {browseResults.length} result{browseResults.length !== 1 ? 's' : ''}
+                                    </span>
                                 </div>
 
-                                <div>
-                                    <h3 className="flex items-center gap-2 font-bold text-gray-800 mb-4">
-                                        <ShieldCheck size={18} className="text-emerald-500" /> Top Contributors
-                                    </h3>
-                                    <div className="space-y-3">
-                                        {[1, 2, 3].map(i => (
-                                            <div key={i} className="flex items-center gap-3 text-sm text-gray-600">
-                                                <div className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center text-xs font-bold">U{i}</div>
-                                                <span>Contributed 3 resources to CMPT 225</span>
+                                <div className="divide-y divide-gray-50">
+                                    {browseResults.length > 0 ? (
+                                        browseResults.map((item, idx) => (
+                                            activeTab === 'Professors' ? (
+                                                <div key={idx} className="p-4 hover:bg-gray-50 flex items-center justify-between group cursor-pointer transition-colors">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="w-10 h-10 rounded-full bg-red-50 text-[#a6192e] flex items-center justify-center font-bold">
+                                                            {item.name.charAt(0)}
+                                                        </div>
+                                                        <div>
+                                                            <h4 className="font-bold text-gray-800 group-hover:text-[#a6192e] transition-colors">{item.name}</h4>
+                                                            <p className="text-sm text-gray-500">{item.dept} Department</p>
+                                                        </div>
+                                                    </div>
+                                                    <ChevronRight size={18} className="text-gray-300 group-hover:text-[#a6192e]" />
+                                                </div>
+                                            ) : (
+                                                <div
+                                                    key={idx}
+                                                    className="p-4 hover:bg-gray-50 flex items-center justify-between group cursor-pointer transition-colors"
+                                                    onClick={() => {
+                                                        // When browsing departments, select it to view courses
+                                                        setSelectedMajor(item.value || item);
+                                                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                                                    }}
+                                                >
+                                                    <div>
+                                                        <h4 className="font-bold text-gray-800 group-hover:text-[#a6192e] transition-colors text-lg">
+                                                            {item.text || item.value || item}
+                                                        </h4>
+                                                        {item.name && <p className="text-sm text-gray-500">{item.name}</p>}
+                                                    </div>
+                                                    <div className="flex items-center gap-2 text-sm text-gray-400 group-hover:text-[#a6192e]">
+                                                        View Courses <ChevronRight size={16} />
+                                                    </div>
+                                                </div>
+                                            )
+                                        ))
+                                    ) : (
+                                        <div className="p-12 text-center text-gray-400 flex flex-col items-center gap-3">
+                                            <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center">
+                                                <span className="text-xl font-bold text-gray-300">?</span>
                                             </div>
-                                        ))}
-                                    </div>
+                                            <p>No results found for "{browseLetter}"</p>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </section>
@@ -463,69 +920,31 @@ function App() {
                                     </div>
 
                                     {/* Right Column: Protected Content */}
-                                    <div className="relative">
+                                    {/* Right Column: Protected Content -> Call to Action */}
+                                    <div className="flex flex-col justify-center h-full space-y-6">
+                                        <div className="bg-gradient-to-br from-red-50 to-white p-6 rounded-2xl border border-red-100 shadow-sm">
+                                            <h4 className="text-lg font-bold text-gray-900 mb-2">Want the A+ blueprint?</h4>
+                                            <p className="text-sm text-gray-600 mb-6 leading-relaxed">
+                                                Access our curated guide for <b>{selectedItem.code}</b>. Includes community notes, video tutorials, and past syllabi.
+                                            </p>
 
-                                        {/* Content Logic */}
-                                        <div className={!hasContributed ? 'blur-content opacity-50' : ''}>
-                                            <div className="mb-6">
-                                                <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
-                                                    <MessageSquare size={18} /> Crowd Tips
-                                                </h4>
-                                                <ul className="space-y-3">
-                                                    {selectedItem.tips.map((tip, i) => (
-                                                        <li key={i} className="text-sm text-gray-600 bg-gray-50 p-3 rounded-md border border-gray-100">
-                                                            "{tip}"
-                                                        </li>
-                                                    ))}
-                                                </ul>
-                                            </div>
-
-                                            <div>
-                                                <h4 className="font-bold text-gray-800 mb-3 flex items-center gap-2">
-                                                    <BookOpen size={18} /> Top Resources
-                                                </h4>
-                                                <div className="space-y-3">
-                                                    {selectedItem.resources.map((r, i) => (
-                                                        <div key={i} className="flex items-start justify-between p-3 rounded-md border border-gray-100 hover:border-red-200 transition bg-white">
-                                                            <div className="flex-1">
-                                                                <div className="flex items-center gap-2 mb-1">
-                                                                    <span className="text-xs font-bold uppercase text-red-600 bg-red-50 px-1.5 rounded">{r.type}</span>
-                                                                    <a href="#" className="text-sm font-medium text-gray-900 hover:underline">{r.title}</a>
-                                                                </div>
-                                                            </div>
-                                                            <button
-                                                                onClick={() => incrementVote(r.id)}
-                                                                className="flex flex-col items-center ml-3 text-gray-400 hover:text-green-600"
-                                                            >
-                                                                <ThumbsUp size={16} />
-                                                                <span className="text-xs font-bold mt-1">{(r.votes || 0) + (resourceVotes[r.id] || 0)}</span>
-                                                            </button>
-                                                        </div>
-                                                    ))}
+                                            <button
+                                                onClick={() => {
+                                                    setSelectedItem(selectedItem); // Keep context
+                                                    setCurrentView('success-guide');
+                                                }}
+                                                className="w-full group relative flex items-center justify-center gap-3 py-3 bg-[#a6192e] hover:bg-[#8a1526] text-white rounded-xl font-bold shadow-lg shadow-red-900/10 hover:shadow-xl hover:shadow-red-900/20 transition-all transform hover:-translate-y-0.5"
+                                            >
+                                                <span>How to succeed in {selectedItem.code.split(' ')[0]}</span>
+                                                <div className="bg-white/20 p-1 rounded-full group-hover:translate-x-1 transition-transform">
+                                                    <ArrowRight size={16} />
                                                 </div>
+                                            </button>
+
+                                            <div className="mt-4 text-center">
+                                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Powered by Crowd Data</span>
                                             </div>
                                         </div>
-
-                                        {/* Gate Overlay */}
-                                        {!hasContributed && (
-                                            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center text-center p-6">
-                                                <div className="bg-white/90 backdrop-blur-md p-6 rounded-xl shadow-xl border border-gray-200 max-w-sm">
-                                                    <div className="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                                                        <Lock size={24} />
-                                                    </div>
-                                                    <h4 className="text-lg font-bold text-gray-900 mb-2">Unlock Full Insights</h4>
-                                                    <p className="text-sm text-gray-600 mb-4">
-                                                        Contribute just <b>one review</b> to see full topic maps, exam tips, and resource libraries.
-                                                    </p>
-                                                    <button
-                                                        onClick={() => setShowContributionForm(true)}
-                                                        className="btn btn-primary w-full shadow-lg"
-                                                    >
-                                                        Write a 60-second review
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        )}
                                     </div>
                                 </div>
 
@@ -585,8 +1004,12 @@ function App() {
                                     >
                                         Cancel
                                     </button>
-                                    <button type="submit" className="btn btn-primary">
-                                        Submit Review
+                                    <button
+                                        type="submit"
+                                        className="btn btn-primary"
+                                        disabled={submittingReview}
+                                    >
+                                        {submittingReview ? 'Submitting...' : 'Submit Review'}
                                     </button>
                                 </div>
                             </form>
@@ -594,9 +1017,10 @@ function App() {
                     )}
 
                 </>
-            )}
+            )
+            }
 
-        </div>
+        </div >
     );
 }
 

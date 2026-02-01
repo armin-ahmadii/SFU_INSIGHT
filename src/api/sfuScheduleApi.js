@@ -40,6 +40,71 @@ export async function getSectionDetails(year, term, dept, courseNum, section) {
 }
 
 /**
+ * Scan for professors from major departments (Real API Fetch)
+ * This crawls Dept -> Courses -> Sections -> SectionDetails to find instructors.
+ * It calls onBatchFound with new unique professors as they are discovered.
+ */
+export async function startProfessorAggregation(year, term, onBatchFound) {
+    const MAJOR_DEPTS = ['cmpt', 'bus', 'math', 'psyc', 'bisc', 'econ', 'ensc', 'phys', 'chem', 'crim'];
+    const seenProfs = new Set();
+
+    // Helper to process a department
+    const processDept = async (dept) => {
+        try {
+            const courses = await getCourses(year, term, dept);
+            // Limit to first 20 courses per dept to prevent excessive rate limiting
+            const coursesToScan = courses.slice(0, 20);
+
+            const deptProfs = [];
+
+            // Process courses in small batches
+            const BATCH_SIZE = 5;
+            for (let i = 0; i < coursesToScan.length; i += BATCH_SIZE) {
+                const batch = coursesToScan.slice(i, i + BATCH_SIZE);
+                await Promise.all(batch.map(async (course) => {
+                    try {
+                        const sections = await getSections(year, term, dept, course.value);
+                        // Just check the first valid lecture section to save requests
+                        const mainSection = sections.find(s => s.sectionCode === 'LEC') || sections[0];
+
+                        if (mainSection) {
+                            const details = await getSectionDetails(year, term, dept, course.value, mainSection.value);
+                            if (details.instructor) {
+                                details.instructor.forEach(inst => {
+                                    if (inst.name && !seenProfs.has(inst.name)) {
+                                        seenProfs.add(inst.name);
+                                        deptProfs.push({
+                                            id: `prof-${inst.name.replace(/\s+/g, '-').toLowerCase()}`,
+                                            name: inst.name, // e.g. "Diana Cukierman"
+                                            dept: dept.toUpperCase(),
+                                            email: inst.email || '',
+                                            profileUrl: inst.profileUrl || ''
+                                        });
+                                    }
+                                });
+                            }
+                        }
+                    } catch (err) {
+                        // Continue if a single course fails
+                    }
+                }));
+            }
+
+            if (deptProfs.length > 0 && typeof onBatchFound === 'function') {
+                onBatchFound(deptProfs);
+            }
+        } catch (e) {
+            console.error(`Failed to scan dept ${dept}`, e);
+        }
+    };
+
+    // Sequential execution of departments to be gentle on the API
+    for (const dept of MAJOR_DEPTS) {
+        await processDept(dept);
+    }
+}
+
+/**
  * Convert time string to minutes since midnight
  */
 export function timeToMinutes(timeStr) {

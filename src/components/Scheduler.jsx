@@ -18,7 +18,6 @@ const HOURS = Array.from({ length: 14 }, (_, i) => i + 8);
 export default function Scheduler() {
     const deptRef = useRef(null);
     const courseRef = useRef(null);
-
     const [year] = useState('2026');
     const [term] = useState('spring');
 
