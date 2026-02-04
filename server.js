@@ -4,6 +4,10 @@ import rmp from '@mtucourses/rate-my-professors';
 import dotenv from 'dotenv';
 import { createClerkClient } from '@clerk/clerk-sdk-node';
 import { createClient } from '@supabase/supabase-js';
+import fetch from 'node-fetch';
+
+console.log('--- SERVER STARTING ---');
+console.log('Node Version:', process.version);
 
 // Access the RMP library functions from the default export
 const searchTeacher = rmp.default?.searchTeacher || rmp.searchTeacher;
@@ -12,7 +16,9 @@ const getTeacher = rmp.default?.getTeacher || rmp.getTeacher;
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 5000 || 3001;
+const PORT = process.env.PORT || 5000;
+
+console.log('Initial Port:', PORT);
 
 // Initialize Clerk Client
 const clerkClient = createClerkClient({ secretKey: process.env.CLERK_SECRET_KEY });
@@ -36,6 +42,10 @@ app.use(cors());
 app.use(express.json({ limit: '15mb' })); // Increased for base64 uploads
 
 const SFU_SCHOOL_ID = 'U2Nob29sLTE0ODI=';
+
+// --- HEALTH CHECK ---
+app.get('/health', (req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
+app.get('/', (req, res) => res.send('SFU Insight API is running!'));
 
 // --- ROUTES ---
 
