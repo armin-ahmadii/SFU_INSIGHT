@@ -239,12 +239,12 @@ function App() {
                 setRmpData(null);
                 setRmpError(false);
                 try {
-                    const searchRes = await fetch(`http://localhost:3001/api/professors/search?name=${encodeURIComponent(selectedItem.name)}`);
+                    const searchRes = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/professors/search?name=${encodeURIComponent(selectedItem.name)}`);
                     const searchResults = await searchRes.json();
 
                     if (searchResults && searchResults.length > 0) {
                         const profId = searchResults[0].id;
-                        const detailRes = await fetch(`http://localhost:3001/api/professors/${profId}`);
+                        const detailRes = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/professors/${profId}`);
                         const profDetails = await detailRes.json();
                         setRmpData(profDetails);
                     }
@@ -260,7 +260,7 @@ function App() {
             const fetchProfCourses = async () => {
                 setProfCoursesLoading(true);
                 try {
-                    const res = await fetch(`http://localhost:3001/api/instructor-courses?name=${encodeURIComponent(selectedItem.name)}`);
+                    const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/instructor-courses?name=${encodeURIComponent(selectedItem.name)}`);
                     const data = await res.json();
                     setProfCourses(Array.isArray(data) ? data : []);
                 } catch (error) {
@@ -535,7 +535,7 @@ function App() {
             setSearchLoading(true);
             try {
                 // 1. Fetch Backend Professors (RMP)
-                const profPromise = fetch(`http://127.0.0.1:3001/api/professors/search?name=${encodeURIComponent(query)}`)
+                const profPromise = fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/professors/search?name=${encodeURIComponent(query)}`)
                     .then(res => res.ok ? res.json() : [])
                     .catch(() => []);
 
@@ -741,7 +741,7 @@ function App() {
                 // ... other fields
             };
 
-            const response = await fetch('http://localhost:3001/api/reviews', {
+            const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001'}/api/reviews`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ userId: user.id, reviewData: formData })
@@ -777,7 +777,7 @@ function App() {
     };
 
     return (
-        
+
         <div className="min-h-screen pb-20">
 
             {/* Header */}
